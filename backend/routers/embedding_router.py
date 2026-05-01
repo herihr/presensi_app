@@ -1,0 +1,55 @@
+from fastapi import APIRouter, Depends, HTTPException
+from sqlalchemy.orm import Session
+
+from core.database import get_db
+from services.embedding_service import EmbeddingService
+from schemas.crud_schema import EmbeddingCreate, EmbeddingUpdate, EmbeddingResponse
+
+router = APIRouter(prefix="/embedding", tags=["Embedding"])
+
+
+@router.post("/", response_model=EmbeddingResponse)
+def create_embedding(data: EmbeddingCreate, db: Session = Depends(get_db)):
+    return EmbeddingService.create_embedding(db, data)
+
+
+@router.get("/", response_model=list[EmbeddingResponse])
+def get_all_embeddings(db: Session = Depends(get_db)):
+    return EmbeddingService.get_all_embeddings(db)
+
+
+@router.get("/{embedding_id}", response_model=EmbeddingResponse)
+def get_embedding(embedding_id: int, db: Session = Depends(get_db)):
+    emb = EmbeddingService.get_embedding_by_id(db, embedding_id)
+    if not emb:
+        raise HTTPException(status_code=404, detail="Embedding tidak ditemukan")
+    return emb
+
+
+@router.get("/siswa/{siswa_id}", response_model=list[EmbeddingResponse])
+def get_embedding_by_siswa(siswa_id: int, db: Session = Depends(get_db)):
+    return EmbeddingService.get_embedding_by_siswa(db, siswa_id)
+
+
+@router.put("/{embedding_id}", response_model=EmbeddingResponse)
+def update_embedding(embedding_id: int, data: EmbeddingUpdate, db: Session = Depends(get_db)):
+    emb = EmbeddingService.update_embedding(db, embedding_id, data)
+    if not emb:
+        raise HTTPException(status_code=404, detail="Embedding tidak ditemukan")
+    return emb
+
+
+@router.delete("/{embedding_id}")
+def delete_embedding(embedding_id: int, db: Session = Depends(get_db)):
+    success = EmbeddingService.delete_embedding(db, embedding_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Embedding tidak ditemukan")
+    return {"message": "Embedding berhasil dihapus"}
+
+
+@router.delete("/siswa/{siswa_id}")
+def delete_embedding_by_siswa(siswa_id: int, db: Session = Depends(get_db)):
+    success = EmbeddingService.delete_embedding_by_siswa(db, siswa_id)
+    if not success:
+        raise HTTPException(status_code=404, detail="Embedding tidak ditemukan")
+    return {"message": "Embedding siswa berhasil dihapus"}

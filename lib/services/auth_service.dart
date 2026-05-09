@@ -10,7 +10,16 @@ class AuthService {
       "password": password,
     });
 
-    final userJson = res['user']; // 🔥 ambil bagian user saja
-    return User.fromJson(userJson);
+    if (res is! Map) {
+      throw Exception('Response login tidak valid dari server');
+    }
+
+    final user = User.fromLoginResponse(Map<String, dynamic>.from(res));
+    ApiService.setToken(user.accessToken);
+    return user;
+  }
+
+  void logout() {
+    ApiService.clearToken();
   }
 }

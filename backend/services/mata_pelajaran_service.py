@@ -7,13 +7,23 @@ class MataPelajaranService:
     # 🔹 CREATE MATA PELAJARAN
     @staticmethod
     def create_mata_pelajaran(db: Session, data):
-        mapel = MataPelajaran(
-            nama_mapel=data.nama_mapel
-        )
-        db.add(mapel)
-        db.commit()
-        db.refresh(mapel)
-        return mapel
+        try:
+            existing = db.query(MataPelajaran).filter(
+                MataPelajaran.nama_mapel == data.nama_mapel
+            ).first()
+            if existing:
+                raise ValueError("Nama mata pelajaran sudah digunakan")
+
+            mapel = MataPelajaran(
+                nama_mapel=data.nama_mapel
+            )
+            db.add(mapel)
+            db.commit()
+            db.refresh(mapel)
+            return mapel
+        except Exception:
+            db.rollback()
+            raise
 
     # 🔹 GET ALL MATA PELAJARAN
     @staticmethod
@@ -33,16 +43,26 @@ class MataPelajaranService:
     # 🔹 UPDATE MATA PELAJARAN
     @staticmethod
     def update_mata_pelajaran(db: Session, mapel_id: int, data):
-        mapel = db.query(MataPelajaran).filter(MataPelajaran.id == mapel_id).first()
-        if not mapel:
-            return None
+        try:
+            mapel = db.query(MataPelajaran).filter(MataPelajaran.id == mapel_id).first()
+            if not mapel:
+                return None
 
-        if data.nama_mapel:
-            mapel.nama_mapel = data.nama_mapel
+            if data.nama_mapel:
+                existing = db.query(MataPelajaran).filter(
+                    MataPelajaran.nama_mapel == data.nama_mapel,
+                    MataPelajaran.id != mapel_id,
+                ).first()
+                if existing:
+                    raise ValueError("Nama mata pelajaran sudah digunakan")
+                mapel.nama_mapel = data.nama_mapel
 
-        db.commit()
-        db.refresh(mapel)
-        return mapel
+            db.commit()
+            db.refresh(mapel)
+            return mapel
+        except Exception:
+            db.rollback()
+            raise
 
     # 🔹 DELETE MATA PELAJARAN
     @staticmethod

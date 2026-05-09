@@ -14,7 +14,8 @@ class AdminService:
         admin = Admin(
             nama=data.nama,
             email=data.email,
-            password=hash_password(data.password)
+            password=hash_password(data.password),
+            foto_url=data.foto_url,
         )
         db.add(admin)
         db.commit()
@@ -49,6 +50,8 @@ class AdminService:
             admin.email = data.email
         if data.password:
             admin.password = hash_password(data.password)
+        if data.foto_url is not None:
+            admin.foto_url = data.foto_url
 
         db.commit()
         db.refresh(admin)

@@ -2,14 +2,17 @@ from fastapi import APIRouter, Depends, HTTPException
 from sqlalchemy.orm import Session
 
 from core.database import get_db
-from services.guru_service import GuruService
+from dependencies.auth import require_admin
 from schemas.crud_schema import (
-    GuruCreate, GuruUpdate, GuruResponse,
     AdminCreate, AdminUpdate, AdminResponse
 )
 from services.admin_service import AdminService
 
-router = APIRouter(prefix="/admin", tags=["Admin"])
+router = APIRouter(
+    prefix="/admin",
+    tags=["Admin"],
+    dependencies=[Depends(require_admin)],
+)
 
 
 # ============ ADMIN CRUD ============
@@ -46,39 +49,3 @@ def delete_admin(admin_id: int, db: Session = Depends(get_db)):
     if not success:
         raise HTTPException(status_code=404, detail="Admin tidak ditemukan")
     return {"message": "Admin berhasil dihapus"}
-
-
-# ============ GURU CRUD ============
-
-@router.post("/guru", response_model=GuruResponse)
-def create_guru(data: GuruCreate, db: Session = Depends(get_db)):
-    return AdminService.create_guru(db, data)
-
-
-@router.get("/guru", response_model=list[GuruResponse])
-def get_all_guru(db: Session = Depends(get_db)):
-    return AdminService.get_all_guru(db)
-
-
-@router.get("/guru/{guru_id}", response_model=GuruResponse)
-def get_guru(guru_id: int, db: Session = Depends(get_db)):
-    guru = AdminService.get_guru_by_id(db, guru_id)
-    if not guru:
-        raise HTTPException(status_code=404, detail="Guru tidak ditemukan")
-    return guru
-
-
-@router.put("/guru/{guru_id}", response_model=GuruResponse)
-def update_guru(guru_id: int, data: GuruUpdate, db: Session = Depends(get_db)):
-    guru = AdminService.update_guru(db, guru_id, data)
-    if not guru:
-        raise HTTPException(status_code=404, detail="Guru tidak ditemukan")
-    return guru
-
-
-@router.delete("/guru/{guru_id}")
-def delete_guru(guru_id: int, db: Session = Depends(get_db)):
-    success = AdminService.delete_guru(db, guru_id)
-    if not success:
-        raise HTTPException(status_code=404, detail="Guru tidak ditemukan")
-    return {"message": "Guru berhasil dihapus"}

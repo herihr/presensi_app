@@ -7,4 +7,8 @@ class AuthController {
   Future<User?> login(String email, String password) {
     return _service.login(email, password);
   }
+
+  void logout() {
+    _service.logout();
+  }
 }

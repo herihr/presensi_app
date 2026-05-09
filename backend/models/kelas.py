@@ -2,12 +2,13 @@ from sqlalchemy import Column, Integer, String, ForeignKey
 from sqlalchemy.orm import relationship
 from core.database import Base
 
+
 class Kelas(Base):
     __tablename__ = "kelas"
 
     id = Column(Integer, primary_key=True, index=True)
-    nama_kelas = Column(String(50))
-    wali_kelas_id = Column(Integer, ForeignKey("guru.id"), unique=True)
+    nama_kelas = Column(String(50), unique=True, nullable=False)
+    wali_kelas_id = Column(Integer, ForeignKey("guru.id"), unique=True, nullable=True)
 
     # Relationships
     # 1 kelas hanya 1 wali kelas saja

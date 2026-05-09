@@ -1,6 +1,6 @@
 from sqlalchemy.orm import Session
+from models.kelas import Kelas
 from models.siswa import Siswa
-from core.security import hash_password
 
 
 class SiswaService:
@@ -8,15 +8,25 @@ class SiswaService:
     # 🔹 CREATE SISWA
     @staticmethod
     def create_siswa(db: Session, data):
-        siswa = Siswa(
-            nama=data.nama,
-            nis=data.nis,
-            kelas_id=data.kelas_id
-        )
-        db.add(siswa)
-        db.commit()
-        db.refresh(siswa)
-        return siswa
+        try:
+            if not db.query(Kelas).filter(Kelas.id == data.kelas_id).first():
+                raise ValueError("Kelas tidak ditemukan")
+
+            siswa = Siswa(
+                nama=data.nama,
+                nis=data.nis,
+                kelas_id=data.kelas_id,
+                alamat=data.alamat,
+                foto_url=data.foto_url,
+                embedding_status=data.embedding_status,
+            )
+            db.add(siswa)
+            db.commit()
+            db.refresh(siswa)
+            return siswa
+        except Exception:
+            db.rollback()
+            raise
 
     # 🔹 GET ALL SISWA
     @staticmethod
@@ -41,28 +51,44 @@ class SiswaService:
     # 🔹 UPDATE SISWA
     @staticmethod
     def update_siswa(db: Session, siswa_id: int, data):
-        siswa = db.query(Siswa).filter(Siswa.id == siswa_id).first()
-        if not siswa:
-            return None
+        try:
+            siswa = db.query(Siswa).filter(Siswa.id == siswa_id).first()
+            if not siswa:
+                return None
 
-        if data.nama:
-            siswa.nama = data.nama
-        if data.nis:
-            siswa.nis = data.nis
-        if data.kelas_id:
-            siswa.kelas_id = data.kelas_id
+            if data.nama:
+                siswa.nama = data.nama
+            if data.nis:
+                siswa.nis = data.nis
+            if data.kelas_id:
+                if not db.query(Kelas).filter(Kelas.id == data.kelas_id).first():
+                    raise ValueError("Kelas tidak ditemukan")
+                siswa.kelas_id = data.kelas_id
+            if data.alamat is not None:
+                siswa.alamat = data.alamat
+            if data.foto_url is not None:
+                siswa.foto_url = data.foto_url
+            if data.embedding_status is not None:
+                siswa.embedding_status = data.embedding_status
 
-        db.commit()
-        db.refresh(siswa)
-        return siswa
+            db.commit()
+            db.refresh(siswa)
+            return siswa
+        except Exception:
+            db.rollback()
+            raise
 
     # 🔹 DELETE SISWA
     @staticmethod
     def delete_siswa(db: Session, siswa_id: int):
-        siswa = db.query(Siswa).filter(Siswa.id == siswa_id).first()
-        if not siswa:
-            return False
+        try:
+            siswa = db.query(Siswa).filter(Siswa.id == siswa_id).first()
+            if not siswa:
+                return False
 
-        db.delete(siswa)
-        db.commit()
-        return True
+            db.delete(siswa)
+            db.commit()
+            return True
+        except Exception:
+            db.rollback()
+            raise

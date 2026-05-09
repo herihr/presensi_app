@@ -2,11 +2,12 @@ from sqlalchemy import Column, Integer, String
 from sqlalchemy.orm import relationship
 from core.database import Base
 
+
 class MataPelajaran(Base):
     __tablename__ = "mata_pelajaran"
 
     id = Column(Integer, primary_key=True, index=True)
-    nama_mapel = Column(String(100))
+    nama_mapel = Column(String(100), unique=True, nullable=False)
 
     # Relationships
     # 1 mata pelajaran punya lebih dari 1 guru

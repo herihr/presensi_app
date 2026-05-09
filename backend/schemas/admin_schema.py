@@ -1,4 +1,4 @@
-from pydantic import BaseModel, EmailStr
+from pydantic import BaseModel, EmailStr, Field
 
 
 class GuruCreate(BaseModel):
@@ -6,12 +6,23 @@ class GuruCreate(BaseModel):
     email: EmailStr
     password: str
     nip: str
+    foto_url: str | None = None
+    mapel_id: int | None = None
+    mapel_ids: list[int] | None = None
+    kelas_asuh_id: int | None = None
+    kelas_asuh_ids: list[int] | None = None
 
 
 class GuruUpdate(BaseModel):
-    nama: str
-    email: EmailStr
-    nip: str
+    nama: str | None = None
+    email: EmailStr | None = None
+    password: str | None = None
+    nip: str | None = None
+    foto_url: str | None = None
+    mapel_id: int | None = None
+    mapel_ids: list[int] | None = None
+    kelas_asuh_id: int | None = None
+    kelas_asuh_ids: list[int] | None = None
 
 
 class GuruResponse(BaseModel):
@@ -19,6 +30,11 @@ class GuruResponse(BaseModel):
     nama: str
     email: str
     nip: str
+    foto_url: str | None = None
+    mapel_id: int | None = None
+    mapel_ids: list[int] = Field(default_factory=list)
+    kelas_asuh_id: int | None = None
+    kelas_asuh_ids: list[int] = Field(default_factory=list)
 
     class Config:
         from_attributes = True

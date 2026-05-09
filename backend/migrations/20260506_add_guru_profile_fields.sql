@@ -1,0 +1,2 @@
+ALTER TABLE guru
+ADD COLUMN foto_url VARCHAR(255) NULL;

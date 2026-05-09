@@ -27,7 +27,7 @@ class SimilarityService {
 
       if (sim > maxSim) {
         maxSim = sim;
-        userId = e['user_id'];
+        userId = e['siswa_id'];
       }
     }
 

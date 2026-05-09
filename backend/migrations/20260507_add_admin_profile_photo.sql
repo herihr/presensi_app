@@ -1,0 +1,2 @@
+ALTER TABLE admin
+ADD COLUMN foto_url VARCHAR(255) NULL;

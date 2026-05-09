@@ -1,31 +1,30 @@
-from passlib.context import CryptContext
+import bcrypt
 from jose import jwt
 from datetime import datetime, timedelta
 from core.config import SECRET_KEY, ALGORITHM, ACCESS_TOKEN_EXPIRE_MINUTES
-pwd_context = CryptContext(schemes=["bcrypt"], deprecated="auto")
+
+BCRYPT_MAX_PASSWORD_BYTES = 72
+
+def _password_bytes(password: str) -> bytes:
+    password = str(password).strip()
+    return password.encode("utf-8")[:BCRYPT_MAX_PASSWORD_BYTES]
 
 def hash_password(password: str):
-    # Truncate password to 72 bytes max (bcrypt limit)
-    if len(password.encode('utf-8')) > 72:
-        password = password[:72]
-    return pwd_context.hash(password)
+    return bcrypt.hashpw(_password_bytes(password), bcrypt.gensalt()).decode("utf-8")
 
 def verify_password(plain_password, hashed_password):
-    # 🔥 FORCE CLEAN STRING
-    plain_password = str(plain_password).strip()
-
-    print("DEBUG PASSWORD:", repr(plain_password))
-    print("LEN:", len(plain_password))
-    print("BYTES:", len(plain_password.encode("utf-8")))
-
-    if len(plain_password.encode('utf-8')) > 72:
-        plain_password = plain_password[:72]
-
-    return pwd_context.verify(plain_password, hashed_password)
+    if not hashed_password:
+        return False
+    try:
+        return bcrypt.checkpw(
+            _password_bytes(plain_password),
+            str(hashed_password).encode("utf-8"),
+        )
+    except (TypeError, ValueError):
+        return False
 
 def create_access_token(data: dict):
     to_encode = data.copy()
     expire = datetime.utcnow() + timedelta(minutes=ACCESS_TOKEN_EXPIRE_MINUTES)
-
     to_encode.update({"exp": expire})
     return jwt.encode(to_encode, SECRET_KEY, algorithm=ALGORITHM)

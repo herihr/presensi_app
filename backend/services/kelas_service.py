@@ -1,4 +1,5 @@
 from sqlalchemy.orm import Session
+from models.guru import Guru
 from models.kelas import Kelas
 
 
@@ -7,14 +8,20 @@ class KelasService:
     # 🔹 CREATE KELAS
     @staticmethod
     def create_kelas(db: Session, data):
-        kelas = Kelas(
-            nama_kelas=data.nama_kelas,
-            wali_kelas_id=data.wali_kelas_id
-        )
-        db.add(kelas)
-        db.commit()
-        db.refresh(kelas)
-        return kelas
+        try:
+            KelasService._validate_wali_kelas(db, data.wali_kelas_id)
+
+            kelas = Kelas(
+                nama_kelas=data.nama_kelas,
+                wali_kelas_id=data.wali_kelas_id,
+            )
+            db.add(kelas)
+            db.commit()
+            db.refresh(kelas)
+            return kelas
+        except Exception:
+            db.rollback()
+            raise
 
     # 🔹 GET ALL KELAS
     @staticmethod
@@ -39,18 +46,27 @@ class KelasService:
     # 🔹 UPDATE KELAS
     @staticmethod
     def update_kelas(db: Session, kelas_id: int, data):
-        kelas = db.query(Kelas).filter(Kelas.id == kelas_id).first()
-        if not kelas:
-            return None
+        try:
+            kelas = db.query(Kelas).filter(Kelas.id == kelas_id).first()
+            if not kelas:
+                return None
 
-        if data.nama_kelas:
-            kelas.nama_kelas = data.nama_kelas
-        if data.wali_kelas_id:
-            kelas.wali_kelas_id = data.wali_kelas_id
+            if data.nama_kelas:
+                kelas.nama_kelas = data.nama_kelas
+            if data.wali_kelas_id is not None:
+                KelasService._validate_wali_kelas(
+                    db,
+                    data.wali_kelas_id,
+                    exclude_kelas_id=kelas_id,
+                )
+                kelas.wali_kelas_id = data.wali_kelas_id
 
-        db.commit()
-        db.refresh(kelas)
-        return kelas
+            db.commit()
+            db.refresh(kelas)
+            return kelas
+        except Exception:
+            db.rollback()
+            raise
 
     # 🔹 DELETE KELAS
     @staticmethod
@@ -62,3 +78,22 @@ class KelasService:
         db.delete(kelas)
         db.commit()
         return True
+
+    @staticmethod
+    def _validate_wali_kelas(
+        db: Session,
+        wali_kelas_id: int | None,
+        exclude_kelas_id: int | None = None,
+    ):
+        if not wali_kelas_id:
+            return
+
+        if not db.query(Guru).filter(Guru.id == wali_kelas_id).first():
+            raise ValueError("Wali kelas tidak ditemukan")
+
+        query = db.query(Kelas).filter(Kelas.wali_kelas_id == wali_kelas_id)
+        if exclude_kelas_id is not None:
+            query = query.filter(Kelas.id != exclude_kelas_id)
+
+        if query.first():
+            raise ValueError("Guru ini sudah menjadi wali kelas lain")

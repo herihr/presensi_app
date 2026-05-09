@@ -45,6 +45,8 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
             "user": {
                 "id": guru.id,
                 "nama": guru.nama,
+                "email": guru.email,
+                "foto_url": guru.foto_url,
                 "role": "guru",
                 "is_wali": is_wali,
                 "is_mapel": is_mapel
@@ -69,6 +71,8 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
             "user": {
                 "id": admin.id,
                 "nama": admin.nama,
+                "email": admin.email,
+                "foto_url": admin.foto_url,
                 "role": "admin",
                 "is_wali": False,
                 "is_mapel": False

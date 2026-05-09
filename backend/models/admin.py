@@ -1,4 +1,4 @@
-from sqlalchemy import Column, Integer, String
+from sqlalchemy import Column, Integer, String, Text
 from core.database import Base
 
 class Admin(Base):
@@ -8,3 +8,4 @@ class Admin(Base):
     nama = Column(String(100))
     email = Column(String(100), unique=True)
     password = Column(String(255))
+    foto_url = Column(Text, nullable=True)

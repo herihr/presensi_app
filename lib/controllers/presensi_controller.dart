@@ -9,15 +9,39 @@ class PresensiController {
   final SimilarityService _similarity = SimilarityService();
   final PresensiService _service = PresensiService();
 
-  Future<void> presensi(dynamic image) async {
+  Future<void> presensi(
+    dynamic image, {
+    required int jadwalId,
+    required int guruId,
+  }) async {
     final face = await _detector.detect(image);
     final embedding = await _embedder.embed(face);
 
     final dbEmbeddings = await _service.getEmbeddings();
-    final userId = _similarity.findClosest(embedding, dbEmbeddings);
+    final siswaId = _similarity.findClosest(embedding, dbEmbeddings);
 
-    if (userId != null) {
-      await _service.kirimPresensi(userId);
+    if (siswaId != null) {
+      final now = DateTime.now();
+      await _service.kirimPresensi(
+        siswaId: siswaId,
+        jadwalId: jadwalId,
+        guruId: guruId,
+        status: 'hadir',
+        tanggal: _formatDate(now),
+        jamPresensi: _formatTime(now),
+      );
     }
+  }
+
+  String _formatDate(DateTime dateTime) {
+    final month = dateTime.month.toString().padLeft(2, '0');
+    final day = dateTime.day.toString().padLeft(2, '0');
+    return '${dateTime.year}-$month-$day';
+  }
+
+  String _formatTime(DateTime dateTime) {
+    final hour = dateTime.hour.toString().padLeft(2, '0');
+    final minute = dateTime.minute.toString().padLeft(2, '0');
+    return '$hour:$minute';
   }
 }

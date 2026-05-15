@@ -231,6 +231,7 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
 
   bool _isLoading = false;
   bool _isLoadingOptions = true;
+  int? _selectedGrade;
   int? _selectedKelasId;
   String? _selectedHari;
   int _jumlahMapel = 1;
@@ -274,6 +275,9 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
         _kelasOptions = (responses[0] as List)
             .map((item) => _OptionItem.fromJson(item, 'nama_kelas'))
             .toList();
+        if (_selectedKelasId != null) {
+          _selectedGrade = _gradeForKelasId(_selectedKelasId!);
+        }
         _mapelOptions = (responses[1] as List)
             .map((item) => _OptionItem.fromJson(item, 'nama_mapel'))
             .toList();
@@ -310,6 +314,24 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
         ),
       );
     _breakAfterIndex = _breakIndexFromSchedules(_initialSchedules);
+  }
+
+  int? _gradeForKelasId(int kelasId) {
+    for (final item in _kelasOptions) {
+      if (item.id == kelasId) {
+        return _gradeFromClassName(item.label);
+      }
+    }
+    return null;
+  }
+
+  List<_OptionItem> _kelasOptionsForSelectedGrade() {
+    final grade = _selectedGrade;
+    if (grade == null) return const [];
+    return _kelasOptions
+        .where((item) => _gradeFromClassName(item.label) == grade)
+        .toList()
+      ..sort((a, b) => a.label.toLowerCase().compareTo(b.label.toLowerCase()));
   }
 
   Future<void> _loadGuruForMapel(int mapelId) async {
@@ -497,6 +519,7 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
   @override
   Widget build(BuildContext context) {
     final previews = _buildPreview();
+    final kelasOptions = _kelasOptionsForSelectedGrade();
 
     return Scaffold(
       backgroundColor: const Color(0xFFFAF8FF),
@@ -520,12 +543,47 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
                         title: 'Rencana Jadwal',
                         children: [
                           DropdownButtonFormField<int>(
+                            value: _selectedGrade,
+                            decoration: _inputDecoration(
+                              label: 'Tingkat Kelas',
+                              icon: Icons.school_rounded,
+                            ),
+                            items: const [7, 8, 9]
+                                .map(
+                                  (grade) => DropdownMenuItem<int>(
+                                    value: grade,
+                                    child: Text('Kelas $grade'),
+                                  ),
+                                )
+                                .toList(),
+                            onChanged: _isEditMode
+                                ? null
+                                : (value) {
+                                    setState(() {
+                                      _selectedGrade = value;
+                                      final selectedKelasId = _selectedKelasId;
+                                      if (selectedKelasId != null &&
+                                          _gradeForKelasId(selectedKelasId) !=
+                                              value) {
+                                        _selectedKelasId = null;
+                                      }
+                                    });
+                                  },
+                            validator: (value) {
+                              if (value == null) {
+                                return 'Tingkat kelas wajib dipilih';
+                              }
+                              return null;
+                            },
+                          ),
+                          const SizedBox(height: 14),
+                          DropdownButtonFormField<int>(
                             value: _selectedKelasId,
                             decoration: _inputDecoration(
                               label: 'Nama Kelas',
                               icon: Icons.class_rounded,
                             ),
-                            items: _kelasOptions
+                            items: kelasOptions
                                 .map(
                                   (item) => DropdownMenuItem<int>(
                                     value: item.id,
@@ -533,10 +591,18 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
                                   ),
                                 )
                                 .toList(),
-                            onChanged: (value) {
-                              setState(() => _selectedKelasId = value);
-                            },
+                            onChanged: _selectedGrade == null || _isEditMode
+                                ? null
+                                : (value) {
+                                    setState(() => _selectedKelasId = value);
+                                  },
                             validator: (value) {
+                              if (_selectedGrade == null) {
+                                return 'Pilih tingkat kelas terlebih dahulu';
+                              }
+                              if (kelasOptions.isEmpty) {
+                                return 'Belum ada kelas pada tingkat ini';
+                              }
                               if (value == null) return 'Kelas wajib dipilih';
                               return null;
                             },

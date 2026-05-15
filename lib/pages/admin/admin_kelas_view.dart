@@ -144,34 +144,7 @@ class _AdminKelasViewState extends State<AdminKelasView> {
                     );
                   }
 
-                  final groups = _KelasGroups.fromItems(kelas);
-                  return Column(
-                    children: [
-                      _KelasGroupCard(
-                        title: 'Kelas VII',
-                        subtitle: 'Daftar kelas tingkat 7',
-                        accentColor: const Color(0xFF2563EB),
-                        kelas: groups.kelas7,
-                        guruById: data.guruById,
-                      ),
-                      const SizedBox(height: 16),
-                      _KelasGroupCard(
-                        title: 'Kelas VIII',
-                        subtitle: 'Daftar kelas tingkat 8',
-                        accentColor: const Color(0xFF10B981),
-                        kelas: groups.kelas8,
-                        guruById: data.guruById,
-                      ),
-                      const SizedBox(height: 16),
-                      _KelasGroupCard(
-                        title: 'Kelas IX',
-                        subtitle: 'Daftar kelas tingkat 9',
-                        accentColor: const Color(0xFFF59E0B),
-                        kelas: groups.kelas9,
-                        guruById: data.guruById,
-                      ),
-                    ],
-                  );
+                  return _KelasGroupedTabs(data: data);
                 },
               ),
               const SizedBox(height: 80),
@@ -201,7 +174,7 @@ class _TambahKelasPageState extends State<TambahKelasPage> {
 
   bool _isLoading = false;
   String? _selectedTingkat;
-  String? _selectedRombel;
+  final Set<String> _selectedRombels = {};
   late Set<String> _existingKelas;
 
   @override
@@ -223,11 +196,10 @@ class _TambahKelasPageState extends State<TambahKelasPage> {
       setState(() {
         _existingKelas = names;
         final tingkat = _selectedTingkat;
-        final rombel = _selectedRombel;
-        if (tingkat != null &&
-            rombel != null &&
-            _isKelasUnavailable('$tingkat $rombel')) {
-          _selectedRombel = null;
+        if (tingkat != null) {
+          _selectedRombels.removeWhere(
+            (rombel) => _isKelasUnavailable('$tingkat $rombel'),
+          );
         }
       });
     } catch (_) {
@@ -239,14 +211,24 @@ class _TambahKelasPageState extends State<TambahKelasPage> {
     if (!_formKey.currentState!.validate()) return;
 
     final tingkat = _selectedTingkat;
-    final rombel = _selectedRombel;
-    if (tingkat == null || rombel == null) return;
-    final namaKelas = '$tingkat $rombel';
-    if (_isKelasUnavailable(namaKelas)) {
+    if (tingkat == null) return;
+    if (_selectedRombels.isEmpty) {
+      await AppAlert.warning(
+        context,
+        title: 'Pilih Kelas',
+        message: 'Pilih minimal satu kelas yang ingin ditambahkan.',
+      );
+      return;
+    }
+
+    final kelasNames = _selectedNamaKelas();
+    final unavailable = kelasNames.where(_isKelasUnavailable).toList();
+    if (unavailable.isNotEmpty) {
       await AppAlert.warning(
         context,
         title: 'Kelas Sudah Ada',
-        message: '$namaKelas sudah tersimpan dan tidak bisa ditambahkan lagi.',
+        message:
+            '${unavailable.join(', ')} sudah tersimpan dan tidak bisa ditambahkan lagi.',
       );
       return;
     }
@@ -254,15 +236,18 @@ class _TambahKelasPageState extends State<TambahKelasPage> {
     setState(() => _isLoading = true);
 
     try {
-      await _api.post('/api/kelas/', {
-        'nama_kelas': namaKelas,
-      });
+      for (final namaKelas in kelasNames) {
+        await _api.post('/api/kelas/', {
+          'nama_kelas': namaKelas,
+        });
+      }
 
       if (!mounted) return;
       await AppAlert.success(
         context,
         title: 'Berhasil',
-        message: 'Kelas berhasil ditambahkan.',
+        message:
+            '${kelasNames.length} kelas berhasil ditambahkan: ${kelasNames.join(', ')}.',
       );
       Navigator.of(context).pop(true);
     } catch (error) {
@@ -292,129 +277,146 @@ class _TambahKelasPageState extends State<TambahKelasPage> {
           padding: const EdgeInsets.all(24),
           children: [
             Form(
-            key: _formKey,
-            child: Column(
-              crossAxisAlignment: CrossAxisAlignment.start,
-              children: [
-                const _KelasHeaderCard(),
-                const SizedBox(height: 24),
-                _SectionCard(
-                  title: 'Informasi Kelas',
-                  children: [
-                    DropdownButtonFormField<String>(
-                      value: _selectedTingkat,
-                      decoration: _inputDecoration(
-                        label: 'Tingkat Kelas',
-                        icon: Icons.class_rounded,
-                      ),
-                      items: _tingkatKelasOptions
-                          .map(
-                            (item) => DropdownMenuItem<String>(
-                              value: item,
-                              child: Text('Kelas $item'),
-                            ),
-                          )
-                          .toList(),
-                      onChanged: (value) {
-                        setState(() {
-                          _selectedTingkat = value;
-                          final selectedRombel = _selectedRombel;
-                          if (value != null &&
-                              selectedRombel != null &&
-                              _isKelasUnavailable('$value $selectedRombel')) {
-                            _selectedRombel = null;
+              key: _formKey,
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  const _KelasHeaderCard(),
+                  const SizedBox(height: 24),
+                  _SectionCard(
+                    title: 'Informasi Kelas',
+                    children: [
+                      DropdownButtonFormField<String>(
+                        value: _selectedTingkat,
+                        decoration: _inputDecoration(
+                          label: 'Tingkat Kelas',
+                          icon: Icons.class_rounded,
+                        ),
+                        items: _tingkatKelasOptions
+                            .map(
+                              (item) => DropdownMenuItem<String>(
+                                value: item,
+                                child: Text('Kelas $item'),
+                              ),
+                            )
+                            .toList(),
+                        onChanged: (value) {
+                          setState(() {
+                            _selectedTingkat = value;
+                            if (value != null) {
+                              _selectedRombels.removeWhere(
+                                (rombel) =>
+                                    _isKelasUnavailable('$value $rombel'),
+                              );
+                            }
+                          });
+                        },
+                        validator: (value) {
+                          if (value == null) {
+                            return 'Tingkat kelas wajib dipilih';
                           }
-                        });
-                      },
-                      validator: (value) {
-                        if (value == null) return 'Tingkat kelas wajib dipilih';
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 14),
-                    DropdownButtonFormField<String>(
-                      value: _selectedRombel,
-                      decoration: _inputDecoration(
-                        label: 'Pilihan Kelas',
-                        icon: Icons.sort_by_alpha_rounded,
+                          return null;
+                        },
                       ),
-                      items: _rombelOptions.map(_buildRombelItem).toList(),
-                      onChanged: _selectedTingkat == null
-                          ? null
-                          : (value) {
-                              setState(() => _selectedRombel = value);
-                            },
-                      validator: (value) {
-                        if (value == null) return 'Pilihan kelas wajib dipilih';
-                        final tingkat = _selectedTingkat;
-                        if (tingkat != null &&
-                            _isKelasUnavailable('$tingkat $value')) {
-                          return 'Kelas $tingkat $value sudah ada';
-                        }
-                        return null;
-                      },
-                    ),
-                    const SizedBox(height: 14),
-                    _KelasPreviewCard(
-                      namaKelas: _selectedTingkat == null || _selectedRombel == null
-                          ? 'Pilih tingkat dan kelas'
-                          : '${_selectedTingkat!} ${_selectedRombel!}',
-                      isUnavailable: _selectedTingkat != null &&
-                          _selectedRombel != null &&
-                          _isKelasUnavailable(
-                            '${_selectedTingkat!} ${_selectedRombel!}',
-                          ),
-                    ),
-                  ],
-                ),
-                const SizedBox(height: 24),
-                SizedBox(
-                  width: double.infinity,
-                  height: 54,
-                  child: FilledButton.icon(
-                    onPressed: _isLoading ? null : _submit,
-                    icon: _isLoading
-                        ? const SizedBox(
-                            width: 18,
-                            height: 18,
-                            child: CircularProgressIndicator(strokeWidth: 2),
-                          )
-                        : const Icon(Icons.save_rounded),
-                    label: Text(_isLoading ? 'Menyimpan' : 'Simpan Kelas'),
-                    style: FilledButton.styleFrom(
-                      backgroundColor: const Color(0xFF2563EB),
-                      shape: RoundedRectangleBorder(
-                        borderRadius: BorderRadius.circular(14),
+                      const SizedBox(height: 14),
+                      _RombelMultiPicker(
+                        enabled: _selectedTingkat != null,
+                        selectedRombels: _selectedRombels,
+                        isUnavailable: (rombel) {
+                          final tingkat = _selectedTingkat;
+                          return tingkat != null &&
+                              _isKelasUnavailable('$tingkat $rombel');
+                        },
+                        onToggle: (rombel) {
+                          if (_selectedTingkat == null) return;
+                          setState(() {
+                            if (_selectedRombels.contains(rombel)) {
+                              _selectedRombels.remove(rombel);
+                            } else {
+                              _selectedRombels.add(rombel);
+                            }
+                          });
+                        },
+                        onSelectRange: (start, end) {
+                          if (_selectedTingkat == null) return;
+                          setState(() {
+                            final startIndex = _rombelOptions.indexOf(start);
+                            final endIndex = _rombelOptions.indexOf(end);
+                            if (startIndex == -1 || endIndex == -1) return;
+                            final from =
+                                startIndex <= endIndex ? startIndex : endIndex;
+                            final to =
+                                startIndex <= endIndex ? endIndex : startIndex;
+                            for (final rombel
+                                in _rombelOptions.sublist(from, to + 1)) {
+                              if (!_isKelasUnavailable(
+                                '${_selectedTingkat!} $rombel',
+                              )) {
+                                _selectedRombels.add(rombel);
+                              }
+                            }
+                          });
+                        },
+                        onClear: () {
+                          setState(_selectedRombels.clear);
+                        },
+                      ),
+                      const SizedBox(height: 14),
+                      _KelasPreviewCard(
+                        namaKelas: _selectedTingkat == null
+                            ? const []
+                            : _selectedNamaKelas(),
+                        emptyLabel: _selectedTingkat == null
+                            ? 'Pilih tingkat kelas terlebih dahulu'
+                            : 'Pilih satu atau beberapa kelas',
+                      ),
+                    ],
+                  ),
+                  const SizedBox(height: 24),
+                  SizedBox(
+                    width: double.infinity,
+                    height: 54,
+                    child: FilledButton.icon(
+                      onPressed: _isLoading ? null : _submit,
+                      icon: _isLoading
+                          ? const SizedBox(
+                              width: 18,
+                              height: 18,
+                              child: CircularProgressIndicator(strokeWidth: 2),
+                            )
+                          : const Icon(Icons.save_rounded),
+                      label: Text(
+                        _isLoading
+                            ? 'Menyimpan'
+                            : _selectedRombels.length <= 1
+                                ? 'Simpan Kelas'
+                                : 'Simpan ${_selectedRombels.length} Kelas',
+                      ),
+                      style: FilledButton.styleFrom(
+                        backgroundColor: const Color(0xFF2563EB),
+                        shape: RoundedRectangleBorder(
+                          borderRadius: BorderRadius.circular(14),
+                        ),
                       ),
                     ),
                   ),
-                ),
-              ],
+                ],
+              ),
             ),
-          ),
           ],
         ),
       ),
     );
   }
 
-  DropdownMenuItem<String> _buildRombelItem(String rombel) {
+  List<String> _selectedNamaKelas() {
     final tingkat = _selectedTingkat;
-    final isUnavailable =
-        tingkat != null && _isKelasUnavailable('$tingkat $rombel');
-
-    return DropdownMenuItem<String>(
-      value: rombel,
-      enabled: !isUnavailable,
-      child: Text(
-        isUnavailable ? '$rombel - sudah ada' : rombel,
-        overflow: TextOverflow.ellipsis,
-        style: TextStyle(
-          color: isUnavailable ? const Color(0xFF9CA3AF) : null,
-          fontWeight: isUnavailable ? FontWeight.w600 : null,
-        ),
-      ),
-    );
+    if (tingkat == null) return const [];
+    final selected = _selectedRombels.toList()
+      ..sort((a, b) => _rombelOptions.indexOf(a).compareTo(
+            _rombelOptions.indexOf(b),
+          ));
+    return selected.map((rombel) => '$tingkat $rombel').toList();
   }
 
   bool _isKelasUnavailable(String namaKelas) {
@@ -473,34 +475,189 @@ class _KelasHeaderCard extends StatelessWidget {
   }
 }
 
-class _KelasPreviewCard extends StatelessWidget {
-  const _KelasPreviewCard({
-    required this.namaKelas,
-    this.isUnavailable = false,
+class _RombelMultiPicker extends StatelessWidget {
+  const _RombelMultiPicker({
+    required this.enabled,
+    required this.selectedRombels,
+    required this.isUnavailable,
+    required this.onToggle,
+    required this.onSelectRange,
+    required this.onClear,
   });
 
-  final String namaKelas;
-  final bool isUnavailable;
+  final bool enabled;
+  final Set<String> selectedRombels;
+  final bool Function(String rombel) isUnavailable;
+  final ValueChanged<String> onToggle;
+  final void Function(String start, String end) onSelectRange;
+  final VoidCallback onClear;
 
   @override
   Widget build(BuildContext context) {
-    final isReady = !namaKelas.startsWith('Pilih') && !isUnavailable;
     return Container(
       width: double.infinity,
       padding: const EdgeInsets.all(14),
       decoration: BoxDecoration(
-        color: isUnavailable
-            ? const Color(0xFFFFF1F2)
-            : isReady
-                ? const Color(0xFFEFF6FF)
-                : const Color(0xFFF8FAFF),
+        color: const Color(0xFFF8FAFF),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFC3C6D7).withOpacity(0.45)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.sort_by_alpha_rounded,
+                color: Color(0xFF4B5563),
+              ),
+              const SizedBox(width: 10),
+              Expanded(
+                child: Text(
+                  'Pilihan Kelas',
+                  style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                        color: const Color(0xFF4B5563),
+                        fontWeight: FontWeight.w800,
+                      ),
+                ),
+              ),
+              if (selectedRombels.isNotEmpty)
+                TextButton(
+                  onPressed: enabled ? onClear : null,
+                  child: const Text('Bersihkan'),
+                ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: _rombelOptions.map((rombel) {
+              final unavailable = enabled && isUnavailable(rombel);
+              final selected = selectedRombels.contains(rombel);
+              return FilterChip(
+                label: Text(unavailable ? '$rombel sudah ada' : rombel),
+                selected: selected,
+                onSelected: !enabled || unavailable
+                    ? null
+                    : (_) => onToggle(rombel),
+                selectedColor: const Color(0xFFDBEAFE),
+                checkmarkColor: const Color(0xFF2563EB),
+                disabledColor: const Color(0xFFF1F5F9),
+                labelStyle: TextStyle(
+                  color: unavailable
+                      ? const Color(0xFF9CA3AF)
+                      : selected
+                          ? const Color(0xFF1D4ED8)
+                          : const Color(0xFF374151),
+                  fontWeight: FontWeight.w800,
+                ),
+                shape: RoundedRectangleBorder(
+                  borderRadius: BorderRadius.circular(999),
+                  side: BorderSide(
+                    color: selected
+                        ? const Color(0xFF2563EB).withOpacity(0.35)
+                        : const Color(0xFFE2E8F0),
+                  ),
+                ),
+              );
+            }).toList(),
+          ),
+          const SizedBox(height: 12),
+          Wrap(
+            spacing: 8,
+            runSpacing: 8,
+            children: [
+              _RangeChip(
+                label: 'A-C',
+                enabled: enabled,
+                onTap: () => onSelectRange('A', 'C'),
+              ),
+              _RangeChip(
+                label: 'D-I',
+                enabled: enabled,
+                onTap: () => onSelectRange('D', 'I'),
+              ),
+              _RangeChip(
+                label: 'J-L',
+                enabled: enabled,
+                onTap: () => onSelectRange('J', 'L'),
+              ),
+            ],
+          ),
+          if (!enabled) ...[
+            const SizedBox(height: 10),
+            Text(
+              'Pilih tingkat kelas dulu agar rombel bisa dipilih.',
+              style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                    color: const Color(0xFF737686),
+                    fontWeight: FontWeight.w600,
+                  ),
+            ),
+          ],
+        ],
+      ),
+    );
+  }
+}
+
+class _RangeChip extends StatelessWidget {
+  const _RangeChip({
+    required this.label,
+    required this.enabled,
+    required this.onTap,
+  });
+
+  final String label;
+  final bool enabled;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return ActionChip(
+      avatar: const Icon(Icons.auto_awesome_rounded, size: 16),
+      label: Text(label),
+      onPressed: enabled ? onTap : null,
+      backgroundColor: const Color(0xFFEFF6FF),
+      disabledColor: const Color(0xFFF1F5F9),
+      labelStyle: TextStyle(
+        color: enabled ? const Color(0xFF1D4ED8) : const Color(0xFF9CA3AF),
+        fontWeight: FontWeight.w800,
+      ),
+      shape: RoundedRectangleBorder(
+        borderRadius: BorderRadius.circular(999),
+        side: BorderSide(
+          color: enabled
+              ? const Color(0xFF2563EB).withOpacity(0.18)
+              : const Color(0xFFE2E8F0),
+        ),
+      ),
+    );
+  }
+}
+
+class _KelasPreviewCard extends StatelessWidget {
+  const _KelasPreviewCard({
+    required this.namaKelas,
+    required this.emptyLabel,
+  });
+
+  final List<String> namaKelas;
+  final String emptyLabel;
+
+  @override
+  Widget build(BuildContext context) {
+    final isReady = namaKelas.isNotEmpty;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isReady ? const Color(0xFFEFF6FF) : const Color(0xFFF8FAFF),
         borderRadius: BorderRadius.circular(14),
         border: Border.all(
-          color: isUnavailable
-              ? const Color(0xFFDC2626).withOpacity(0.28)
-              : isReady
-                  ? const Color(0xFF2563EB).withOpacity(0.28)
-                  : const Color(0xFFC3C6D7).withOpacity(0.45),
+          color: isReady
+              ? const Color(0xFF2563EB).withOpacity(0.28)
+              : const Color(0xFFC3C6D7).withOpacity(0.45),
         ),
       ),
       child: Row(
@@ -513,12 +670,9 @@ class _KelasPreviewCard extends StatelessWidget {
               shape: BoxShape.circle,
             ),
             child: Icon(
-              isUnavailable ? Icons.block_rounded : Icons.badge_rounded,
-              color: isUnavailable
-                  ? const Color(0xFFDC2626)
-                  : isReady
-                      ? const Color(0xFF2563EB)
-                      : const Color(0xFF737686),
+              isReady ? Icons.done_all_rounded : Icons.badge_rounded,
+              color:
+                  isReady ? const Color(0xFF2563EB) : const Color(0xFF737686),
             ),
           ),
           const SizedBox(width: 12),
@@ -527,7 +681,9 @@ class _KelasPreviewCard extends StatelessWidget {
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  'Nama kelas otomatis',
+                  isReady
+                      ? '${namaKelas.length} kelas akan dibuat'
+                      : 'Nama kelas otomatis',
                   style: Theme.of(context).textTheme.labelMedium?.copyWith(
                         color: const Color(0xFF737686),
                         fontWeight: FontWeight.w700,
@@ -535,15 +691,13 @@ class _KelasPreviewCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 3),
                 Text(
-                  isUnavailable ? '$namaKelas sudah ada' : namaKelas,
-                  maxLines: 1,
+                  isReady ? namaKelas.join(', ') : emptyLabel,
+                  maxLines: 2,
                   overflow: TextOverflow.ellipsis,
                   style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        color: isUnavailable
-                            ? const Color(0xFFB91C1C)
-                            : isReady
-                                ? const Color(0xFF1D4ED8)
-                                : const Color(0xFF737686),
+                        color: isReady
+                            ? const Color(0xFF1D4ED8)
+                            : const Color(0xFF737686),
                         fontWeight: FontWeight.w900,
                       ),
                 ),
@@ -677,6 +831,133 @@ class _EmptyState extends StatelessWidget {
           textAlign: TextAlign.center,
         ),
       ],
+    );
+  }
+}
+
+class _KelasGroupedTabs extends StatefulWidget {
+  const _KelasGroupedTabs({
+    required this.data,
+  });
+
+  final _KelasListData data;
+
+  @override
+  State<_KelasGroupedTabs> createState() => _KelasGroupedTabsState();
+}
+
+class _KelasGroupedTabsState extends State<_KelasGroupedTabs> {
+  int _selectedGrade = 7;
+
+  @override
+  Widget build(BuildContext context) {
+    final groups = _KelasGroups.fromItems(widget.data.kelas);
+    final kelasByGrade = <int, List<_KelasItem>>{
+      7: groups.kelas7,
+      8: groups.kelas8,
+      9: groups.kelas9,
+    };
+    final selectedKelas =
+        kelasByGrade[_selectedGrade] ?? const <_KelasItem>[];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _GradeTabBar(
+          selectedGrade: _selectedGrade,
+          counts: {
+            for (final entry in kelasByGrade.entries)
+              entry.key: entry.value.length,
+          },
+          onChanged: (grade) {
+            setState(() => _selectedGrade = grade);
+          },
+        ),
+        const SizedBox(height: 18),
+        _KelasGroupCard(
+          title: _kelasGroupTitle(_selectedGrade),
+          subtitle: 'Daftar kelas tingkat $_selectedGrade',
+          accentColor: _kelasGroupColor(_selectedGrade),
+          kelas: selectedKelas,
+          guruById: widget.data.guruById,
+        ),
+      ],
+    );
+  }
+}
+
+class _GradeTabBar extends StatelessWidget {
+  const _GradeTabBar({
+    required this.selectedGrade,
+    required this.counts,
+    required this.onChanged,
+  });
+
+  final int selectedGrade;
+  final Map<int, int> counts;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF3FF),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFC3C6D7).withOpacity(0.35)),
+      ),
+      child: Row(
+        children: [7, 8, 9].map((grade) {
+          final isSelected = selectedGrade == grade;
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => onChanged(grade),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isSelected ? Colors.white : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: const Color(0xFF2563EB).withOpacity(0.12),
+                              blurRadius: 12,
+                              offset: const Offset(0, 5),
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Kelas $grade',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: isSelected
+                                  ? const Color(0xFF2563EB)
+                                  : const Color(0xFF737686),
+                            ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${counts[grade] ?? 0} kelas',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: const Color(0xFF737686),
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
     );
   }
 }
@@ -973,6 +1254,18 @@ class _KelasListData {
   factory _KelasListData.empty() {
     return const _KelasListData(kelas: [], guruById: {});
   }
+}
+
+String _kelasGroupTitle(int grade) {
+  if (grade == 8) return 'Kelas VIII';
+  if (grade == 9) return 'Kelas IX';
+  return 'Kelas VII';
+}
+
+Color _kelasGroupColor(int grade) {
+  if (grade == 8) return const Color(0xFF10B981);
+  if (grade == 9) return const Color(0xFFF59E0B);
+  return const Color(0xFF2563EB);
 }
 
 int? _gradeFromClassName(String name) {

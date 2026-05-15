@@ -1,9 +1,9 @@
+import 'dart:math' as math;
+
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
 
-import '../../ai/similarity_service.dart';
 import '../../ai/realtime_face_detector.dart';
-import '../../ai/face_embedder.dart';
 import '../../services/api_service.dart';
 
 class RealtimePresensiPage extends StatefulWidget {
@@ -12,22 +12,28 @@ class RealtimePresensiPage extends StatefulWidget {
     required this.mapel,
     required this.className,
     required this.jadwalId,
+    required this.kelasId,
     required this.guruId,
+    this.onRecognizedStudents,
+    this.targetStudentId,
+    this.targetStudentName,
   });
 
   final String mapel;
   final String className;
   final int jadwalId;
+  final int kelasId;
   final int guruId;
+  final ValueChanged<Set<int>>? onRecognizedStudents;
+  final int? targetStudentId;
+  final String? targetStudentName;
 
   @override
   State<RealtimePresensiPage> createState() => _RealtimePresensiPageState();
 }
 
 class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
-  final _detector = RealtimeFaceDetector();
-  final _embedder = FaceEmbedder();
-  final _similarity = SimilarityService();
+  final _aiProcessor = RealtimeAiProcessor();
   final _api = ApiService();
 
   CameraController? _cameraController;
@@ -35,11 +41,9 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
   int _cameraIndex = 0;
   bool _isInitializing = true;
   bool _isStreaming = false;
-  bool _isProcessingFrame = false;
   String _status = 'Menyiapkan kamera dan model deteksi...';
-  int _frameCount = 0;
-  List<_KnownFace> _knownFaces = const [];
-  List<_RecognizedFaceBox> _recognizedFaces = const [];
+  List<AiRecognizedFaceBox> _recognizedFaces = const [];
+  final Set<int> _reportedStudentIds = {};
   Size? _lastFrameSize;
 
   @override
@@ -51,15 +55,12 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
   @override
   void dispose() {
     _stopCamera();
-    _detector.close();
-    _embedder.close();
+    _aiProcessor.stop();
     super.dispose();
   }
 
   Future<void> _initialize() async {
     try {
-      final modelInfo = await _detector.load();
-      final knownFaces = await _loadKnownFaces();
       final cameras = await availableCameras();
       if (cameras.isEmpty) {
         throw StateError('Kamera tidak ditemukan di perangkat ini');
@@ -70,17 +71,17 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
       );
       _cameras = cameras;
       _cameraIndex = preferredIndex == -1 ? 0 : preferredIndex;
-      _knownFaces = knownFaces;
 
       await _startCamera(
         cameras[_cameraIndex],
-        readyStatus:
-            'Presensi realtime aktif. $modelInfo. ${knownFaces.length} embedding siswa dimuat.',
+        readyStatus: 'Kamera aktif. Menyiapkan model AI dan embedding siswa...',
       );
       if (!mounted) return;
       setState(() {
         _isInitializing = false;
       });
+
+      await _initializeAiWorker();
     } catch (error) {
       if (!mounted) return;
       setState(() {
@@ -88,6 +89,33 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
         _status = error.toString().replaceFirst('Exception: ', '');
       });
     }
+  }
+
+  Future<void> _initializeAiWorker() async {
+    try {
+      final knownFaces = await _loadKnownFaces();
+      await _aiProcessor.start(knownFaces: knownFaces);
+      if (!mounted) return;
+      final targetName = widget.targetStudentName;
+      setState(() {
+        _status = targetName == null
+            ? 'Presensi realtime aktif. AI isolate siap. Maksimal 3 frame per detik diproses. ${knownFaces.length} embedding siswa dimuat.'
+            : 'Pindai wajah $targetName. Arahkan wajah ke kamera sampai dikenali.';
+      });
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _status = _friendlyAiError(error);
+      });
+    }
+  }
+
+  String _friendlyAiError(Object error) {
+    final message = error.toString().replaceFirst('Exception: ', '');
+    if (message.toLowerCase().contains('timeoutexception')) {
+      return 'Kamera aktif, tetapi model AI terlalu lama disiapkan. Tutup halaman ini lalu buka ulang scan.';
+    }
+    return 'Kamera aktif, tetapi AI belum siap: $message';
   }
 
   Future<void> _startCamera(
@@ -102,6 +130,9 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
     );
 
     await controller.initialize();
+    debugPrint(
+      'Kamera aktif: ${camera.lensDirection.name}, sensorOrientation=${camera.sensorOrientation}',
+    );
     await controller.startImageStream(_onCameraFrame);
 
     if (!mounted) {
@@ -134,7 +165,7 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
       await _startCamera(
         _cameras[_cameraIndex],
         readyStatus:
-            'Kamera ${_activeCameraLabel().toLowerCase()} aktif. Model deteksi wajah siap.',
+            'Kamera ${_activeCameraLabel().toLowerCase()} aktif. AI isolate tetap berjalan.',
       );
     } catch (error) {
       if (!mounted) return;
@@ -148,13 +179,9 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
     }
   }
 
-  Future<List<_KnownFace>> _loadKnownFaces() async {
+  Future<List<AiKnownFace>> _loadKnownFaces() async {
     try {
-      final jadwal = await _api.get('/api/jadwal/${widget.jadwalId}');
-      final kelasId = _intFromJson(jadwal['kelas_id']);
-      final siswaResponse = kelasId == null
-          ? await _api.get('/api/siswa/')
-          : await _api.get('/api/siswa/kelas/$kelasId');
+      final siswaResponse = await _api.get('/api/siswa/kelas/${widget.kelasId}');
       final siswaById = <int, String>{};
       for (final item in siswaResponse as List) {
         final siswa = item as Map<String, dynamic>;
@@ -165,15 +192,19 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
       }
 
       final embeddingResponse = await _api.get('/api/embedding/');
-      final knownFaces = <_KnownFace>[];
+      final knownFaces = <AiKnownFace>[];
       for (final item in embeddingResponse as List) {
         final embeddingJson = item as Map<String, dynamic>;
         final siswaId = _intFromJson(embeddingJson['siswa_id']);
+        if (widget.targetStudentId != null &&
+            siswaId != widget.targetStudentId) {
+          continue;
+        }
         final name = siswaId == null ? null : siswaById[siswaId];
         final embedding = _embeddingFromJson(embeddingJson['embedding']);
         if (siswaId != null && name != null && embedding.isNotEmpty) {
           knownFaces.add(
-            _KnownFace(
+            AiKnownFace(
               siswaId: siswaId,
               name: name,
               embedding: embedding,
@@ -182,68 +213,68 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
         }
       }
       return knownFaces;
-    } catch (_) {
-      return const [];
+    } catch (error) {
+      throw StateError(
+        'Embedding siswa tidak bisa dimuat: ${error.toString().replaceFirst('Exception: ', '')}',
+      );
     }
   }
 
   Future<void> _onCameraFrame(CameraImage image) async {
-    _frameCount++;
-    if (_frameCount % 30 != 0 || !mounted || _isProcessingFrame) return;
+    if (!mounted) return;
 
-    _isProcessingFrame = true;
     try {
-      final detections = await _detector.detect(image);
-      final recognized = <_RecognizedFaceBox>[];
-      for (final box in detections) {
-        final crop = box.faceImage;
-        _FaceMatch? match;
-        if (crop != null) {
-          try {
-            match = _bestKnownFace(await _embedder.embedImage(crop));
-          } catch (_) {
-            match = null;
-          }
-        }
-        recognized.add(
-          _RecognizedFaceBox(
-            left: box.left,
-            top: box.top,
-            width: box.width,
-            height: box.height,
-            name: match?.face.name ?? 'Wajah tidak dikenal',
-            confidence: match?.score ?? box.confidence,
-          ),
-        );
-      }
+      final rotationDegrees =
+          _cameraController?.description.sensorOrientation ?? 0;
+      final recognized = await _aiProcessor.processFrame(
+        image,
+        rotationDegrees: rotationDegrees,
+      );
+      if (recognized == null) return;
 
       if (!mounted) return;
+      _reportRecognizedStudents(recognized);
       setState(() {
-        _lastFrameSize = Size(image.width.toDouble(), image.height.toDouble());
+        _lastFrameSize = _processedFrameSize(image, rotationDegrees);
         _recognizedFaces = recognized;
         _status = recognized.isEmpty
             ? 'Mencari wajah pada frame kamera...'
             : 'Wajah terdeteksi: ${recognized.map((item) => item.name).join(', ')}';
+        debugPrint(
+          'UI update wajah: ${recognized.length}, frameSize=${_lastFrameSize!.width.toStringAsFixed(0)}x${_lastFrameSize!.height.toStringAsFixed(0)}',
+        );
       });
-    } finally {
-      _isProcessingFrame = false;
+    } catch (error) {
+      if (!mounted) return;
+      setState(() {
+        _status = error.toString().replaceFirst('Exception: ', '');
+      });
     }
   }
 
-  _FaceMatch? _bestKnownFace(List<double> probe) {
-    if (_knownFaces.isEmpty) return null;
+  void _reportRecognizedStudents(List<AiRecognizedFaceBox> faces) {
+    final ids = faces
+        .where((face) => face.isRecognized && face.siswaId != null)
+        .map((face) => face.siswaId!)
+        .where(
+          (id) => widget.targetStudentId == null || id == widget.targetStudentId,
+        )
+        .where((id) => !_reportedStudentIds.contains(id))
+        .toSet();
+    if (ids.isEmpty) return;
 
-    _KnownFace? best;
-    var bestScore = -1.0;
-    for (final face in _knownFaces) {
-      final score = _similarity.cosineSimilarity(probe, face.embedding);
-      if (score > bestScore) {
-        bestScore = score;
-        best = face;
-      }
-    }
-    if (best == null || bestScore < 0.65) return null;
-    return _FaceMatch(face: best, score: bestScore);
+    _reportedStudentIds.addAll(ids);
+    widget.onRecognizedStudents?.call(ids);
+  }
+
+  Size _processedFrameSize(CameraImage image, int rotationDegrees) {
+    final normalizedRotation = rotationDegrees % 360;
+    final isRotated = normalizedRotation == 90 || normalizedRotation == 270;
+    final width = isRotated ? image.height.toDouble() : image.width.toDouble();
+    final height = isRotated ? image.width.toDouble() : image.height.toDouble();
+    const maxAiFrameSide = 480.0;
+    final scale = math.min(1.0, maxAiFrameSide / math.max(width, height));
+    return Size(width * scale, height * scale);
   }
 
   Future<void> _stopCamera() async {
@@ -319,7 +350,7 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
                       crossAxisAlignment: CrossAxisAlignment.start,
                       children: [
                         Text(
-                          widget.mapel,
+                          widget.targetStudentName ?? widget.mapel,
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: const TextStyle(
@@ -329,7 +360,9 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
                           ),
                         ),
                         Text(
-                          widget.className,
+                          widget.targetStudentName == null
+                              ? widget.className
+                              : '${widget.mapel} • ${widget.className}',
                           maxLines: 1,
                           overflow: TextOverflow.ellipsis,
                           style: TextStyle(
@@ -407,7 +440,7 @@ class _ScannerOverlayPainter extends CustomPainter {
     required this.frameSize,
   });
 
-  final List<_RecognizedFaceBox> faces;
+  final List<AiRecognizedFaceBox> faces;
   final Size? frameSize;
 
   @override
@@ -436,8 +469,10 @@ class _ScannerOverlayPainter extends CustomPainter {
 
     for (final face in faces) {
       final faceRect = _scaleFaceRect(face, size);
+      final accentColor =
+          face.isRecognized ? const Color(0xFF10B981) : const Color(0xFFEF4444);
       final facePaint = Paint()
-        ..color = const Color(0xFF10B981)
+        ..color = accentColor
         ..strokeWidth = 4
         ..style = PaintingStyle.stroke;
       canvas.drawRRect(
@@ -466,7 +501,7 @@ class _ScannerOverlayPainter extends CustomPainter {
         textPainter.width + 18,
         textPainter.height + 10,
       );
-      final labelPaint = Paint()..color = const Color(0xFF10B981);
+      final labelPaint = Paint()..color = accentColor;
       canvas.drawRRect(
         RRect.fromRectAndRadius(labelRect, const Radius.circular(10)),
         labelPaint,
@@ -475,7 +510,7 @@ class _ScannerOverlayPainter extends CustomPainter {
     }
   }
 
-  Rect _scaleFaceRect(_RecognizedFaceBox face, Size canvasSize) {
+  Rect _scaleFaceRect(AiRecognizedFaceBox face, Size canvasSize) {
     final frame = frameSize;
     if (frame == null || frame.width == 0 || frame.height == 0) {
       return Rect.fromLTWH(
@@ -486,13 +521,19 @@ class _ScannerOverlayPainter extends CustomPainter {
       );
     }
 
-    final scaleX = canvasSize.width / frame.width;
-    final scaleY = canvasSize.height / frame.height;
+    final scale = math.max(
+      canvasSize.width / frame.width,
+      canvasSize.height / frame.height,
+    );
+    final drawnWidth = frame.width * scale;
+    final drawnHeight = frame.height * scale;
+    final offsetX = (canvasSize.width - drawnWidth) / 2;
+    final offsetY = (canvasSize.height - drawnHeight) / 2;
     return Rect.fromLTWH(
-      face.left * scaleX,
-      face.top * scaleY,
-      face.width * scaleX,
-      face.height * scaleY,
+      offsetX + face.left * scale,
+      offsetY + face.top * scale,
+      face.width * scale,
+      face.height * scale,
     );
   }
 
@@ -500,46 +541,6 @@ class _ScannerOverlayPainter extends CustomPainter {
   bool shouldRepaint(covariant _ScannerOverlayPainter oldDelegate) {
     return oldDelegate.faces != faces || oldDelegate.frameSize != frameSize;
   }
-}
-
-class _KnownFace {
-  const _KnownFace({
-    required this.siswaId,
-    required this.name,
-    required this.embedding,
-  });
-
-  final int siswaId;
-  final String name;
-  final List<double> embedding;
-}
-
-class _FaceMatch {
-  const _FaceMatch({
-    required this.face,
-    required this.score,
-  });
-
-  final _KnownFace face;
-  final double score;
-}
-
-class _RecognizedFaceBox {
-  const _RecognizedFaceBox({
-    required this.left,
-    required this.top,
-    required this.width,
-    required this.height,
-    required this.name,
-    required this.confidence,
-  });
-
-  final double left;
-  final double top;
-  final double width;
-  final double height;
-  final String name;
-  final double confidence;
 }
 
 int? _intFromJson(dynamic value) {

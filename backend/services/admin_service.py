@@ -77,7 +77,9 @@ class AdminService:
             nama=data.nama,
             email=data.email,
             password=hash_password(data.password),
-            nip=data.nip
+            nip=data.nip,
+            jenis_kelamin=data.jenis_kelamin,
+            foto_url=data.foto_url,
         )
         db.add(guru)
         db.commit()
@@ -117,6 +119,10 @@ class AdminService:
             guru.email = data.email
         if data.nip:
             guru.nip = data.nip
+        if "jenis_kelamin" in getattr(data, "model_fields_set", getattr(data, "__fields_set__", set())):
+            guru.jenis_kelamin = data.jenis_kelamin
+        if data.foto_url is not None:
+            guru.foto_url = data.foto_url
         if data.password:
             guru.password = hash_password(data.password)
 

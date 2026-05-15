@@ -55,6 +55,7 @@ class GuruCreate(BaseModel):
     email: EmailStr
     password: str
     nip: str
+    jenis_kelamin: Optional[str] = None
     foto_url: Optional[str] = None
     mapel_id: Optional[int] = None
     mapel_ids: Optional[list[int]] = None
@@ -66,6 +67,7 @@ class GuruUpdate(BaseModel):
     nama: Optional[str] = None
     email: Optional[EmailStr] = None
     nip: Optional[str] = None
+    jenis_kelamin: Optional[str] = None
     password: Optional[str] = None
     foto_url: Optional[str] = None
     mapel_id: Optional[int] = None
@@ -78,6 +80,7 @@ class GuruProfileUpdate(BaseModel):
     nama: Optional[str] = None
     email: Optional[EmailStr] = None
     password: Optional[str] = None
+    jenis_kelamin: Optional[str] = None
     foto_url: Optional[str] = None
 
 
@@ -86,6 +89,7 @@ class GuruResponse(BaseModel):
     nama: str
     email: str
     nip: str
+    jenis_kelamin: Optional[str] = None
     foto_url: Optional[str] = None
     mapel_id: Optional[int] = None
     mapel_ids: list[int] = Field(default_factory=list)
@@ -101,6 +105,7 @@ class GuruResponse(BaseModel):
 class SiswaCreate(BaseModel):
     nama: str
     nis: str
+    jenis_kelamin: Optional[str] = None
     kelas_id: int
     alamat: Optional[str] = None
     foto_url: Optional[str] = None
@@ -110,6 +115,7 @@ class SiswaCreate(BaseModel):
 class SiswaUpdate(BaseModel):
     nama: Optional[str] = None
     nis: Optional[str] = None
+    jenis_kelamin: Optional[str] = None
     kelas_id: Optional[int] = None
     alamat: Optional[str] = None
     foto_url: Optional[str] = None
@@ -120,6 +126,7 @@ class SiswaResponse(BaseModel):
     id: int
     nama: str
     nis: str
+    jenis_kelamin: Optional[str] = None
     kelas_id: int
     alamat: Optional[str] = None
     foto_url: Optional[str] = None
@@ -215,7 +222,7 @@ class JadwalResponse(BaseModel):
     kelas_id: int
     mapel_id: int
     guru_id: int
-    hari: ValidHari
+    hari: str
     jam_mulai: str
     jam_selesai: str
 

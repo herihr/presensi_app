@@ -17,6 +17,7 @@ class GuruService:
                 email=data.email,
                 password=hash_password(data.password),
                 nip=data.nip,
+                jenis_kelamin=data.jenis_kelamin,
                 foto_url=data.foto_url,
             )
             db.add(guru)
@@ -84,6 +85,8 @@ class GuruService:
                 guru.email = data.email
             if getattr(data, "nip", None):
                 guru.nip = data.nip
+            if GuruService._field_was_sent(data, "jenis_kelamin"):
+                guru.jenis_kelamin = data.jenis_kelamin
             if getattr(data, "foto_url", None) is not None:
                 guru.foto_url = data.foto_url
             if getattr(data, "password", None):

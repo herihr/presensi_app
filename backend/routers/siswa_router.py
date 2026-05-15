@@ -82,7 +82,7 @@ def delete_siswa(
     except IntegrityError:
         raise HTTPException(
             status_code=400,
-            detail="Siswa tidak bisa dihapus karena masih memiliki data presensi atau embedding",
+            detail="Siswa tidak bisa dihapus karena masih memiliki relasi data lain",
         )
     if not success:
         raise HTTPException(status_code=404, detail="Siswa tidak ditemukan")

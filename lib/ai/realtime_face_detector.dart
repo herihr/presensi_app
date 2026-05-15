@@ -1,15 +1,25 @@
 import 'dart:math' as math;
+import 'dart:async';
+import 'dart:isolate';
+import 'dart:typed_data';
 
 import 'package:camera/camera.dart';
 import 'package:flutter/foundation.dart';
+import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
+
+import 'face_embedder.dart';
 
 class RealtimeFaceDetector {
   static const _modelPath = 'lib/assets/yolofacedetect.tflite';
   static const _confidenceThreshold = 0.35;
   static const _iouThreshold = 0.40;
+  static const _faceCropPaddingRatio = 0.25;
 
+  RealtimeFaceDetector({Uint8List? modelBytes}) : _modelBytes = modelBytes;
+
+  final Uint8List? _modelBytes;
   Interpreter? _interpreter;
   String? _modelSummary;
 
@@ -18,7 +28,10 @@ class RealtimeFaceDetector {
     if (existing != null) return _modelSummary ?? 'Model deteksi siap';
 
     final options = InterpreterOptions()..threads = 2;
-    final interpreter = await Interpreter.fromAsset(_modelPath, options: options);
+    final bytes = _modelBytes;
+    final interpreter = bytes == null
+        ? await Interpreter.fromAsset(_modelPath, options: options)
+        : Interpreter.fromBuffer(bytes, options: options);
     _interpreter = interpreter;
 
     final inputTensor = interpreter.getInputTensor(0);
@@ -44,43 +57,31 @@ class RealtimeFaceDetector {
 
     final inputTensor = interpreter.getInputTensor(0);
     final outputTensor = interpreter.getOutputTensor(0);
-    final inputShape = inputTensor.shape;
-    if (inputShape.length != 4) {
-      throw StateError('Shape input model deteksi tidak didukung: $inputShape');
-    }
-
-    final inputHeight = inputShape[1];
-    final inputWidth = inputShape[2];
-    final isFloatInput =
-        inputTensor.type.toString().toLowerCase().contains('float');
     final rgbImage = _cameraImageToRgb(image);
-    final resized = img.copyResize(
-      rgbImage,
-      width: inputWidth,
-      height: inputHeight,
-      interpolation: img.Interpolation.linear,
+    return _detectFacesFromRgb(
+      interpreter: interpreter,
+      inputTensor: inputTensor,
+      outputTensor: outputTensor,
+      rgbImage: rgbImage,
+      imageWidth: image.width.toDouble(),
+      imageHeight: image.height.toDouble(),
     );
-    final input = _buildInput(resized, isFloatInput);
-    final output = _zeros(outputTensor.shape);
+  }
 
-    interpreter.run(input, output);
-
-    final rows = _decodeRows(output, outputTensor.shape);
-    final detections = <DetectedFaceBox>[];
-    for (final row in rows) {
-      final box = _decodeBox(
-        row,
-        imageWidth: image.width.toDouble(),
-        imageHeight: image.height.toDouble(),
-        inputWidth: inputWidth.toDouble(),
-        inputHeight: inputHeight.toDouble(),
-      );
-      if (box != null) detections.add(box);
+  Future<List<DetectedFaceBox>> detectImage(img.Image image) async {
+    final interpreter = _interpreter;
+    if (interpreter == null) {
+      throw StateError('Model deteksi wajah belum dimuat');
     }
 
-    return _nonMaxSuppression(detections)
-        .map((box) => box.copyWith(faceImage: _cropFace(rgbImage, box)))
-        .toList();
+    return _detectFacesFromRgb(
+      interpreter: interpreter,
+      inputTensor: interpreter.getInputTensor(0),
+      outputTensor: interpreter.getOutputTensor(0),
+      rgbImage: image,
+      imageWidth: image.width.toDouble(),
+      imageHeight: image.height.toDouble(),
+    );
   }
 
   void close() {
@@ -88,6 +89,52 @@ class RealtimeFaceDetector {
     _interpreter = null;
     _modelSummary = null;
   }
+}
+
+Future<List<DetectedFaceBox>> _detectFacesFromRgb({
+  required Interpreter interpreter,
+  required dynamic inputTensor,
+  required dynamic outputTensor,
+  required img.Image rgbImage,
+  required double imageWidth,
+  required double imageHeight,
+}) async {
+  final inputShape = inputTensor.shape;
+  if (inputShape.length != 4) {
+    throw StateError('Shape input model deteksi tidak didukung: $inputShape');
+  }
+
+  final inputHeight = inputShape[1];
+  final inputWidth = inputShape[2];
+  final isFloatInput =
+      inputTensor.type.toString().toLowerCase().contains('float');
+  final resized = img.copyResize(
+    rgbImage,
+    width: inputWidth,
+    height: inputHeight,
+    interpolation: img.Interpolation.linear,
+  );
+  final input = _buildInput(resized, isFloatInput);
+  final output = _zeros(outputTensor.shape);
+
+  interpreter.run(input, output);
+
+  final rows = _decodeRows(output, outputTensor.shape);
+  final detections = <DetectedFaceBox>[];
+  for (final row in rows) {
+    final box = _decodeBox(
+      row,
+      imageWidth: imageWidth,
+      imageHeight: imageHeight,
+      inputWidth: inputWidth.toDouble(),
+      inputHeight: inputHeight.toDouble(),
+    );
+    if (box != null) detections.add(box);
+  }
+
+  return _nonMaxSuppression(detections)
+      .map((box) => box.copyWith(faceImage: _cropFace(rgbImage, box)))
+      .toList();
 }
 
 img.Image _cameraImageToRgb(CameraImage image) {
@@ -278,10 +325,21 @@ double _iou(DetectedFaceBox a, DetectedFaceBox b) {
 }
 
 img.Image _cropFace(img.Image image, DetectedFaceBox box) {
-  final x = box.left.round().clamp(0, image.width - 1).toInt();
-  final y = box.top.round().clamp(0, image.height - 1).toInt();
-  final width = box.width.round().clamp(1, image.width - x).toInt();
-  final height = box.height.round().clamp(1, image.height - y).toInt();
+  final centerX = box.left + box.width / 2;
+  final centerY = box.top + box.height / 2;
+  final paddedSize = math.max(box.width, box.height) *
+      (1 + RealtimeFaceDetector._faceCropPaddingRatio);
+  final halfSize = paddedSize / 2;
+
+  final left = (centerX - halfSize).clamp(0, image.width - 1).toDouble();
+  final top = (centerY - halfSize).clamp(0, image.height - 1).toDouble();
+  final right = (centerX + halfSize).clamp(left + 1, image.width).toDouble();
+  final bottom = (centerY + halfSize).clamp(top + 1, image.height).toDouble();
+
+  final x = left.round().clamp(0, image.width - 1).toInt();
+  final y = top.round().clamp(0, image.height - 1).toInt();
+  final width = (right - left).round().clamp(1, image.width - x).toInt();
+  final height = (bottom - top).round().clamp(1, image.height - y).toInt();
   return img.copyCrop(image, x: x, y: y, width: width, height: height);
 }
 
@@ -312,4 +370,520 @@ class DetectedFaceBox {
       faceImage: faceImage ?? this.faceImage,
     );
   }
+}
+
+class RealtimeAiProcessor {
+  static const int targetFps = 1;
+  static const double recognitionThreshold = 0.30;
+  static const double minRecognizableFaceSize = 80;
+  static const int maxAiFrameSide = 480;
+  static const int _minFrameIntervalMs = 1000 ~/ targetFps;
+
+  Isolate? _isolate;
+  SendPort? _workerPort;
+  ReceivePort? _receivePort;
+  final _pending = <int, Completer<List<AiRecognizedFaceBox>>>{};
+  int _nextFrameId = 0;
+  bool _isBusy = false;
+  DateTime _lastAcceptedAt = DateTime.fromMillisecondsSinceEpoch(0);
+
+  Future<void> start({
+    required List<AiKnownFace> knownFaces,
+  }) async {
+    if (_workerPort != null) return;
+
+    final yoloModelBytes = await _loadAssetBytes(RealtimeFaceDetector._modelPath);
+    final faceModelBytes = await _loadAssetBytes(FaceEmbedder.modelPath);
+
+    _receivePort = ReceivePort();
+    final readyCompleter = Completer<void>();
+    _receivePort!.listen((message) {
+      if (message is Map && message['type'] == 'ready') {
+        _workerPort = message['sendPort'] as SendPort;
+        if (!readyCompleter.isCompleted) readyCompleter.complete();
+        return;
+      }
+      if (message is Map && message['type'] == 'initError') {
+        if (!readyCompleter.isCompleted) {
+          readyCompleter.completeError(StateError(message['error'].toString()));
+        }
+        return;
+      }
+      _handleWorkerMessage(message);
+    });
+
+    final errorPort = ReceivePort();
+    errorPort.listen((message) {
+      if (!readyCompleter.isCompleted) {
+        readyCompleter.completeError(StateError('AI isolate gagal dimulai: $message'));
+      }
+    });
+
+    _isolate = await Isolate.spawn(
+      _aiWorkerEntry,
+      {
+        'sendPort': _receivePort!.sendPort,
+        'yoloModel': TransferableTypedData.fromList([yoloModelBytes]),
+        'faceModel': TransferableTypedData.fromList([faceModelBytes]),
+        'knownFaces': knownFaces.map((face) => face.toMap()).toList(),
+      },
+      debugName: 'presensi-ai-worker',
+      onError: errorPort.sendPort,
+    );
+
+    try {
+      await readyCompleter.future.timeout(const Duration(seconds: 45));
+    } finally {
+      errorPort.close();
+    }
+  }
+
+  Future<Uint8List> _loadAssetBytes(String assetPath) async {
+    final data = await rootBundle.load(assetPath);
+    return data.buffer.asUint8List(data.offsetInBytes, data.lengthInBytes);
+  }
+
+  Future<List<AiRecognizedFaceBox>?> processFrame(
+    CameraImage image, {
+    int rotationDegrees = 0,
+  }) async {
+    final now = DateTime.now();
+    if (_isBusy ||
+        now.difference(_lastAcceptedAt).inMilliseconds < _minFrameIntervalMs) {
+      return null;
+    }
+
+    final port = _workerPort;
+    if (port == null) return null;
+
+    _isBusy = true;
+    _lastAcceptedAt = now;
+    final frameId = _nextFrameId++;
+    final completer = Completer<List<AiRecognizedFaceBox>>();
+    _pending[frameId] = completer;
+
+    port.send({
+      'type': 'frame',
+      'id': frameId,
+      'width': image.width,
+      'height': image.height,
+      'rotationDegrees': rotationDegrees,
+      'format': image.format.group.name,
+      'planes': image.planes
+          .map((plane) => TransferableTypedData.fromList([plane.bytes]))
+          .toList(),
+      'bytesPerRow': image.planes.map((plane) => plane.bytesPerRow).toList(),
+      'bytesPerPixel':
+          image.planes.map((plane) => plane.bytesPerPixel ?? 1).toList(),
+    });
+
+    try {
+      return await completer.future.timeout(const Duration(seconds: 12));
+    } on TimeoutException {
+      _pending.remove(frameId);
+      debugPrint('AI frame timeout: frame $frameId belum selesai diproses');
+      return null;
+    } finally {
+      _isBusy = false;
+    }
+  }
+
+  void _handleWorkerMessage(dynamic message) {
+    if (message is! Map) return;
+    if (message['type'] != 'result') return;
+
+    final id = message['id'] as int?;
+    if (id == null) return;
+    final completer = _pending.remove(id);
+    if (completer == null || completer.isCompleted) return;
+
+    final error = message['error'];
+    if (error != null) {
+      completer.completeError(StateError(error.toString()));
+      return;
+    }
+
+    final rawFaces = message['faces'];
+    final faces = rawFaces is List
+        ? rawFaces
+            .map((item) => AiRecognizedFaceBox.fromMap(
+                  Map<String, dynamic>.from(item as Map),
+                ))
+            .toList()
+        : <AiRecognizedFaceBox>[];
+    completer.complete(faces);
+  }
+
+  void stop() {
+    for (final completer in _pending.values) {
+      if (!completer.isCompleted) completer.complete(const []);
+    }
+    _pending.clear();
+    _workerPort?.send({'type': 'close'});
+    _workerPort = null;
+    _receivePort?.close();
+    _receivePort = null;
+    _isolate?.kill(priority: Isolate.immediate);
+    _isolate = null;
+    _isBusy = false;
+  }
+}
+
+class AiKnownFace {
+  const AiKnownFace({
+    required this.siswaId,
+    required this.name,
+    required this.embedding,
+  });
+
+  final int siswaId;
+  final String name;
+  final List<double> embedding;
+
+  Map<String, dynamic> toMap() {
+    return {
+      'siswaId': siswaId,
+      'name': name,
+      'embedding': embedding,
+    };
+  }
+}
+
+class AiRecognizedFaceBox {
+  const AiRecognizedFaceBox({
+    required this.left,
+    required this.top,
+    required this.width,
+    required this.height,
+    required this.name,
+    required this.confidence,
+    required this.isRecognized,
+    this.siswaId,
+  });
+
+  final double left;
+  final double top;
+  final double width;
+  final double height;
+  final String name;
+  final double confidence;
+  final bool isRecognized;
+  final int? siswaId;
+
+  factory AiRecognizedFaceBox.fromMap(Map<String, dynamic> map) {
+    return AiRecognizedFaceBox(
+      left: (map['left'] as num).toDouble(),
+      top: (map['top'] as num).toDouble(),
+      width: (map['width'] as num).toDouble(),
+      height: (map['height'] as num).toDouble(),
+      name: map['name']?.toString() ?? 'Tidak dikenali',
+      confidence: (map['confidence'] as num).toDouble(),
+      isRecognized: map['isRecognized'] == true,
+      siswaId: map['siswaId'] as int?,
+    );
+  }
+
+  Map<String, dynamic> toMap() {
+    return {
+      'left': left,
+      'top': top,
+      'width': width,
+      'height': height,
+      'name': name,
+      'confidence': confidence,
+      'isRecognized': isRecognized,
+      'siswaId': siswaId,
+    };
+  }
+}
+
+Future<void> _aiWorkerEntry(Map<String, dynamic> config) async {
+  final mainPort = config['sendPort'] as SendPort;
+  final receivePort = ReceivePort();
+  final yoloModelBytes =
+      (config['yoloModel'] as TransferableTypedData).materialize().asUint8List();
+  final faceModelBytes =
+      (config['faceModel'] as TransferableTypedData).materialize().asUint8List();
+  final detector = RealtimeFaceDetector(modelBytes: yoloModelBytes);
+  final embedder = FaceEmbedder(modelBytes: faceModelBytes);
+  late final List<_WorkerKnownFace> knownFaces;
+
+  try {
+    knownFaces = (config['knownFaces'] as List)
+        .map(
+          (item) => _WorkerKnownFace.fromMap(
+            Map<String, dynamic>.from(item as Map),
+          ),
+        )
+        .toList();
+
+    await detector.load();
+    mainPort.send({
+      'type': 'ready',
+      'sendPort': receivePort.sendPort,
+    });
+  } catch (error) {
+    mainPort.send({
+      'type': 'initError',
+      'error': error.toString().replaceFirst('Exception: ', ''),
+    });
+    receivePort.close();
+    return;
+  }
+
+  await for (final message in receivePort) {
+    if (message is! Map) continue;
+    if (message['type'] == 'close') break;
+    if (message['type'] != 'frame') continue;
+
+    final id = message['id'] as int;
+    try {
+      final frame = _WorkerFrame.fromMessage(message);
+      final rawRgbImage = _workerFrameToRgb(frame);
+      final interpreter = detector._interpreter;
+      if (interpreter == null) {
+        throw StateError('Model deteksi wajah belum siap');
+      }
+      final inputTensor = interpreter.getInputTensor(0);
+      final outputTensor = interpreter.getOutputTensor(0);
+      var selectedRotation = 0;
+      var rgbImage = rawRgbImage;
+      var detections = <DetectedFaceBox>[];
+
+      for (final rotation in _rotationCandidates(frame.rotationDegrees)) {
+        final candidateImage = _rotateImage(rawRgbImage, rotation);
+        final candidateDetections = await _detectFacesFromRgb(
+          interpreter: interpreter,
+          inputTensor: inputTensor,
+          outputTensor: outputTensor,
+          rgbImage: candidateImage,
+          imageWidth: candidateImage.width.toDouble(),
+          imageHeight: candidateImage.height.toDouble(),
+        );
+        selectedRotation = rotation;
+        rgbImage = candidateImage;
+        detections = candidateDetections;
+        if (detections.isNotEmpty) break;
+      }
+
+      debugPrint(
+        'YOLO deteksi wajah: ${detections.length} frame=${frame.width}x${frame.height} sensorRot=${frame.rotationDegrees} usedRot=$selectedRotation rgb=${rgbImage.width}x${rgbImage.height}',
+      );
+
+      final recognized = <AiRecognizedFaceBox>[];
+      for (final box in detections) {
+        if (math.min(box.width, box.height) <
+            RealtimeAiProcessor.minRecognizableFaceSize) {
+          recognized.add(
+            AiRecognizedFaceBox(
+              left: box.left,
+              top: box.top,
+              width: box.width,
+              height: box.height,
+              name: 'Tidak dikenali',
+              confidence: 0,
+              isRecognized: false,
+              siswaId: null,
+            ),
+          );
+          continue;
+        }
+        final crop = box.faceImage;
+        final match = crop == null
+            ? null
+            : _bestKnownFace(await embedder.embedImage(crop), knownFaces);
+        final isRecognized = match != null &&
+            match.score >= RealtimeAiProcessor.recognitionThreshold;
+        recognized.add(
+          AiRecognizedFaceBox(
+            left: box.left,
+            top: box.top,
+            width: box.width,
+            height: box.height,
+            name: isRecognized ? match!.name : 'Tidak dikenali',
+            confidence: match?.score ?? 0,
+            isRecognized: isRecognized,
+            siswaId: isRecognized ? match.siswaId : null,
+          ),
+        );
+      }
+
+      mainPort.send({
+        'type': 'result',
+        'id': id,
+        'faces': recognized.map((face) => face.toMap()).toList(),
+      });
+    } catch (error) {
+      mainPort.send({
+        'type': 'result',
+        'id': id,
+        'error': error.toString().replaceFirst('Exception: ', ''),
+      });
+    }
+  }
+
+  detector.close();
+  embedder.close();
+  receivePort.close();
+}
+
+_WorkerFaceMatch? _bestKnownFace(
+  List<double> probe,
+  List<_WorkerKnownFace> knownFaces,
+) {
+  _WorkerFaceMatch? best;
+  var bestScore = -1.0;
+  for (final face in knownFaces) {
+    final score = _cosineSimilarity(probe, face.embedding);
+    if (score > bestScore) {
+      bestScore = score;
+      best = _WorkerFaceMatch(
+        siswaId: face.siswaId,
+        name: face.name,
+        score: score,
+      );
+    }
+  }
+  if (best != null) {
+    debugPrint(
+      'Face match terbaik: ${best.name} skor=${bestScore.toStringAsFixed(3)} threshold=${RealtimeAiProcessor.recognitionThreshold}',
+    );
+  }
+  return best;
+}
+
+class _WorkerKnownFace {
+  const _WorkerKnownFace({
+    required this.siswaId,
+    required this.name,
+    required this.embedding,
+  });
+
+  final int siswaId;
+  final String name;
+  final List<double> embedding;
+
+  factory _WorkerKnownFace.fromMap(Map<String, dynamic> map) {
+    return _WorkerKnownFace(
+      siswaId: map['siswaId'] as int,
+      name: map['name']?.toString() ?? 'Siswa',
+      embedding: (map['embedding'] as List)
+          .map((item) => (item as num).toDouble())
+          .toList(),
+    );
+  }
+}
+
+double _cosineSimilarity(List<double> a, List<double> b) {
+  if (a.length != b.length || a.isEmpty) return -1;
+  var dot = 0.0;
+  var normA = 0.0;
+  var normB = 0.0;
+  for (var i = 0; i < a.length; i++) {
+    dot += a[i] * b[i];
+    normA += a[i] * a[i];
+    normB += b[i] * b[i];
+  }
+  final denominator = math.sqrt(normA) * math.sqrt(normB);
+  if (denominator == 0) return -1;
+  return dot / denominator;
+}
+
+img.Image _workerFrameToRgb(_WorkerFrame frame) {
+  if (frame.format != ImageFormatGroup.yuv420.name || frame.planes.length < 3) {
+    throw StateError('Format kamera harus YUV420 untuk model deteksi wajah');
+  }
+
+  final scale = math.min(
+    1.0,
+    RealtimeAiProcessor.maxAiFrameSide / math.max(frame.width, frame.height),
+  );
+  final outWidth = math.max(1, (frame.width * scale).round());
+  final outHeight = math.max(1, (frame.height * scale).round());
+  final out = img.Image(width: outWidth, height: outHeight);
+  final yPlane = frame.planes[0];
+  final uPlane = frame.planes[1];
+  final vPlane = frame.planes[2];
+
+  for (var y = 0; y < outHeight; y++) {
+    final sourceY = math.min(frame.height - 1, (y / scale).floor());
+    final yRow = sourceY * frame.bytesPerRow[0];
+    final uvRow = (sourceY >> 1) * frame.bytesPerRow[1];
+    for (var x = 0; x < outWidth; x++) {
+      final sourceX = math.min(frame.width - 1, (x / scale).floor());
+      final uvIndex = uvRow + (sourceX >> 1) * frame.bytesPerPixel[1];
+      final yp = yPlane[yRow + sourceX].toDouble();
+      final up = uPlane[uvIndex].toDouble() - 128.0;
+      final vp = vPlane[uvIndex].toDouble() - 128.0;
+
+      final red = (yp + 1.402 * vp).round().clamp(0, 255);
+      final green = (yp - 0.344136 * up - 0.714136 * vp).round().clamp(0, 255);
+      final blue = (yp + 1.772 * up).round().clamp(0, 255);
+      out.setPixelRgb(x, y, red, green, blue);
+    }
+  }
+
+  return out;
+}
+
+List<int> _rotationCandidates(int rotationDegrees) {
+  final normalizedRotation = rotationDegrees % 360;
+  final inverseRotation = (360 - normalizedRotation) % 360;
+  if (normalizedRotation == inverseRotation) return [normalizedRotation];
+  return [normalizedRotation, inverseRotation];
+}
+
+img.Image _rotateImage(img.Image image, int rotationDegrees) {
+  final normalizedRotation = rotationDegrees % 360;
+  if (normalizedRotation == 0) return image;
+  return img.copyRotate(image, angle: normalizedRotation);
+}
+
+class _WorkerFrame {
+  const _WorkerFrame({
+    required this.width,
+    required this.height,
+    required this.format,
+    required this.rotationDegrees,
+    required this.planes,
+    required this.bytesPerRow,
+    required this.bytesPerPixel,
+  });
+
+  final int width;
+  final int height;
+  final String format;
+  final int rotationDegrees;
+  final List<Uint8List> planes;
+  final List<int> bytesPerRow;
+  final List<int> bytesPerPixel;
+
+  factory _WorkerFrame.fromMessage(Map message) {
+    return _WorkerFrame(
+      width: message['width'] as int,
+      height: message['height'] as int,
+      format: message['format'] as String,
+      rotationDegrees: message['rotationDegrees'] as int? ?? 0,
+      planes: (message['planes'] as List)
+          .map(
+            (item) =>
+                (item as TransferableTypedData).materialize().asUint8List(),
+          )
+          .toList(),
+      bytesPerRow: List<int>.from(message['bytesPerRow'] as List),
+      bytesPerPixel: List<int>.from(message['bytesPerPixel'] as List),
+    );
+  }
+}
+
+class _WorkerFaceMatch {
+  const _WorkerFaceMatch({
+    required this.siswaId,
+    required this.name,
+    required this.score,
+  });
+
+  final int siswaId;
+  final String name;
+  final double score;
 }

@@ -45,6 +45,7 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
             "user": {
                 "id": guru.id,
                 "nama": guru.nama,
+                "jenis_kelamin": guru.jenis_kelamin,
                 "email": guru.email,
                 "foto_url": guru.foto_url,
                 "role": "guru",

@@ -96,14 +96,16 @@ tetap dipakai.
   "email": "guru@gmail.com",
   "password": "123456",
   "nip": "123456789",
+  "jenis_kelamin": "Laki-laki",
   "foto_url": "/storage/emulated/0/Pictures/foto-guru.jpg",
   "mapel_ids": [1, 2],
   "kelas_asuh_id": 1
 }
 ```
 
-`foto_url` menyimpan path foto lokal dari HP untuk kebutuhan tampilan di perangkat
-yang sama. `foto_url`, `mapel_ids`, dan `kelas_asuh_id` bersifat opsional.
+`jenis_kelamin` berisi `Laki-laki` atau `Perempuan`. `foto_url` menyimpan path
+foto lokal dari HP untuk kebutuhan tampilan di perangkat yang sama.
+`jenis_kelamin`, `foto_url`, `mapel_ids`, dan `kelas_asuh_id` bersifat opsional.
 Backend masih menerima `mapel_id` untuk kompatibilitas form lama. Format mapel
 yang disarankan adalah `mapel_ids` karena satu guru bisa
 mengajar lebih dari satu mata pelajaran. Untuk wali kelas, satu guru hanya boleh
@@ -115,6 +117,7 @@ dipilih sebagai wali untuk satu kelas dari form tambah guru.
 {
   "nama": "Siswa 1",
   "nis": "2026001",
+  "jenis_kelamin": "Perempuan",
   "kelas_id": 1,
   "alamat": "Jl. Sekolah No. 1",
   "foto_url": "/storage/emulated/0/Pictures/foto-siswa.jpg",
@@ -122,8 +125,8 @@ dipilih sebagai wali untuk satu kelas dari form tambah guru.
 }
 ```
 
-`nis` harus unik. `embedding_status` hanya boleh `belum_diproses`, `diproses`,
-atau `gagal`.
+`nis` harus unik. `jenis_kelamin` berisi `Laki-laki` atau `Perempuan`.
+`embedding_status` hanya boleh `belum_diproses`, `diproses`, atau `gagal`.
 
 `KelasCreate`
 

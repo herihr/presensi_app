@@ -69,12 +69,81 @@ class _LoginPageState extends State<LoginPage> {
       if (!mounted) return;
       await AppAlert.error(
         context,
-        title: 'Login Gagal',
-        message: error.toString().replaceFirst('Exception: ', ''),
+        title: _loginErrorTitle(error),
+        message: _loginErrorMessage(error),
       );
     } finally {
       if (mounted) setState(() => _isLoading = false);
     }
+  }
+
+  String _loginErrorTitle(Object error) {
+    final message = _normalizeErrorMessage(error);
+    if (_isCredentialError(message)) return 'Login Gagal';
+    if (_isConnectionError(message)) return 'Koneksi Bermasalah';
+    return 'Login Belum Berhasil';
+  }
+
+  String _loginErrorMessage(Object error) {
+    final message = _normalizeErrorMessage(error);
+
+    if (_isCredentialError(message)) {
+      return 'Username/email atau password salah. Silakan periksa kembali data login kamu.';
+    }
+
+    if (_isConnectionError(message)) {
+      return 'Login gagal karena perangkat sedang offline atau server tidak bisa dijangkau. Periksa koneksi internet dan alamat server.';
+    }
+
+    if (message.contains('internal server error') ||
+        message.contains('response login tidak valid')) {
+      return 'Server sedang bermasalah. Silakan coba beberapa saat lagi.';
+    }
+
+    return 'Login belum bisa diproses. Silakan coba lagi.';
+  }
+
+  bool _isCredentialError(String message) {
+    return message.contains('401') ||
+        message.contains('403') ||
+        message.contains('unauthorized') ||
+        message.contains('forbidden') ||
+        message.contains('invalid credentials') ||
+        message.contains('invalid username') ||
+        message.contains('invalid email') ||
+        message.contains('invalid password') ||
+        message.contains('invalid') ||
+        message.contains('incorrect') ||
+        message.contains('wrong') ||
+        message.contains('login gagal') ||
+        message.contains('not found') ||
+        message.contains('tidak ditemukan') ||
+        message.contains('salah') ||
+        message.contains('password');
+  }
+
+  bool _isConnectionError(String message) {
+    return message.contains('socketexception') ||
+        message.contains('clientexception') ||
+        message.contains('xmlhttprequest error') ||
+        message.contains('connection refused') ||
+        message.contains('connection reset') ||
+        message.contains('connection closed') ||
+        message.contains('connection') ||
+        message.contains('timed out') ||
+        message.contains('timeout') ||
+        message.contains('failed host lookup') ||
+        message.contains('no address associated') ||
+        message.contains('network is unreachable') ||
+        message.contains('network');
+  }
+
+  String _normalizeErrorMessage(Object error) {
+    return error
+        .toString()
+        .replaceFirst('Exception: ', '')
+        .trim()
+        .toLowerCase();
   }
 
   void _selectRole(String role) {

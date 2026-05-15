@@ -118,6 +118,7 @@ class _GuruProfilePageState extends State<GuruProfilePage> {
       final responseFotoUrl = response['foto_url']?.toString();
       final updatedUser = widget.user.copyWith(
         nama: response['nama']?.toString() ?? _namaController.text.trim(),
+        jenisKelamin: response['jenis_kelamin']?.toString(),
         email: response['email']?.toString() ?? _emailController.text.trim(),
         fotoUrl: responseFotoUrl == null || responseFotoUrl.isEmpty
             ? _fotoUrl

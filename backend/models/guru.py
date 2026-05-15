@@ -8,6 +8,7 @@ class Guru(Base):
 
     id = Column(Integer, primary_key=True, index=True)
     nama = Column(String(100), nullable=False)
+    jenis_kelamin = Column(String(20), nullable=True)
     email = Column(String(100), unique=True, nullable=False)
     password = Column(String(255), nullable=False)
     nip = Column(String(50), unique=True, nullable=False)

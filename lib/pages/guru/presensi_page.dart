@@ -2,10 +2,13 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
 import '../../services/api_service.dart';
 import '../../utils/app_alert.dart';
 import 'realtime_presensi_page.dart';
+
+const presensiPageResultRekap = 'rekap';
 
 class PresensiPage extends StatefulWidget {
   const PresensiPage({
@@ -13,12 +16,14 @@ class PresensiPage extends StatefulWidget {
     required this.mapel,
     required this.className,
     required this.jadwalId,
+    required this.kelasId,
     required this.guruId,
   });
 
   final String mapel;
   final String className;
   final int jadwalId;
+  final int kelasId;
   final int guruId;
 
   @override
@@ -47,21 +52,38 @@ class _PresensiPageState extends State<PresensiPage> {
 
   Future<List<_StudentAttendance>> _loadStudents() async {
     try {
-      final jadwal = await _api.get('/api/jadwal/${widget.jadwalId}');
-      final kelasId = _intFromJson(jadwal['kelas_id']);
-      if (kelasId == null) return _fallbackStudents;
+      final todayKey = _dateKey(DateTime.now());
+      final responses = await Future.wait([
+        _api.get('/api/siswa/kelas/${widget.kelasId}'),
+        _api.get('/api/presensi/tanggal/$todayKey'),
+      ]);
 
-      final response = await _api.get('/api/siswa/kelas/$kelasId');
-      final students = (response as List)
-          .map((item) => _StudentAttendance.fromJson(item as Map<String, dynamic>))
+      final presentStudentIds = <int>{};
+      for (final raw in responses[1] as List) {
+        final item = Map<String, dynamic>.from(raw as Map);
+        final jadwalId = _intFromJson(item['jadwal_id']);
+        final siswaId = _intFromJson(item['siswa_id']);
+        final status = item['status']?.toString().toLowerCase();
+        if (jadwalId == widget.jadwalId && siswaId != null && status == 'hadir') {
+          presentStudentIds.add(siswaId);
+        }
+      }
+
+      final students = (responses[0] as List)
+          .map(
+            (item) => _StudentAttendance.fromJson(
+              Map<String, dynamic>.from(item as Map),
+              presentStudentIds: presentStudentIds,
+            ),
+          )
           .toList();
 
-      if (students.isEmpty) return _fallbackStudents;
       _students = students;
       return students;
-    } catch (_) {
-      _students = _fallbackStudents;
-      return _fallbackStudents;
+    } catch (error) {
+      debugPrint('Data presensi siswa gagal dimuat: $error');
+      _students = const [];
+      return const [];
     }
   }
 
@@ -72,35 +94,110 @@ class _PresensiPageState extends State<PresensiPage> {
     await _studentsFuture;
   }
 
-  Future<void> _scanStudent(_StudentAttendance student) async {
-    setState(() {
-      _students = _students
-          .map(
-            (item) => item.id == student.id
-                ? item.copyWith(status: _AttendanceStatus.hadir)
-                : item,
-          )
-          .toList();
-    });
+  Future<void> _downloadPresensiExcel() async {
+    try {
+      final students = _students.isEmpty ? await _studentsFuture : _students;
+      final today = DateTime.now();
+      final fileName =
+          'presensi_${_safeFileName(widget.className)}_${_safeFileName(widget.mapel)}_${_dateKey(today)}.xls';
+      final content = _buildExcelContent(
+        students: students,
+        date: today,
+        mapel: widget.mapel,
+        className: widget.className,
+      );
+      final savedPath = await _writeDownloadFile(fileName, content);
 
-    await AppAlert.warning(
-      context,
-      title: 'Pindai Wajah',
-      message: 'Pindai wajah ${student.name} akan dibuka berikutnya.',
-    );
+      if (!mounted) return;
+      await AppAlert.success(
+        context,
+        title: 'Berhasil',
+        message: 'Data presensi berhasil disimpan:\n$savedPath',
+      );
+    } catch (error) {
+      if (!mounted) return;
+      await AppAlert.error(
+        context,
+        title: 'Gagal',
+        message: 'Data presensi belum bisa diunduh. $error',
+      );
+    }
   }
 
-  void _startRealtimePresence() {
-    Navigator.of(context).push(
+  Future<void> _scanStudent(_StudentAttendance student) async {
+    await Navigator.of(context).push(
       MaterialPageRoute(
         builder: (_) => RealtimePresensiPage(
           mapel: widget.mapel,
           className: widget.className,
           jadwalId: widget.jadwalId,
+          kelasId: widget.kelasId,
           guruId: widget.guruId,
+          targetStudentId: student.id,
+          targetStudentName: student.name,
+          onRecognizedStudents: (ids) {
+            if (ids.contains(student.id)) {
+              _markRecognizedStudentsPresent({student.id});
+            }
+          },
         ),
       ),
     );
+  }
+
+  Future<void> _startRealtimePresence() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => RealtimePresensiPage(
+          mapel: widget.mapel,
+          className: widget.className,
+          jadwalId: widget.jadwalId,
+          kelasId: widget.kelasId,
+          guruId: widget.guruId,
+          onRecognizedStudents: _markRecognizedStudentsPresent,
+        ),
+      ),
+    );
+  }
+
+  void _markRecognizedStudentsPresent(Set<int> siswaIds) {
+    if (siswaIds.isEmpty || !mounted) return;
+
+    setState(() {
+      _students = _students
+          .map(
+            (student) => siswaIds.contains(student.id)
+                ? student.copyWith(status: _AttendanceStatus.hadir)
+                : student,
+          )
+          .toList();
+    });
+    _saveRecognizedPresensi(siswaIds);
+  }
+
+  Future<void> _saveRecognizedPresensi(Set<int> siswaIds) async {
+    final now = DateTime.now();
+    final tanggal = _dateKey(now);
+    final jamPresensi =
+        '${now.hour.toString().padLeft(2, '0')}:${now.minute.toString().padLeft(2, '0')}';
+
+    for (final siswaId in siswaIds) {
+      try {
+        await _api.post('/api/presensi/', {
+          'siswa_id': siswaId,
+          'jadwal_id': widget.jadwalId,
+          'guru_id': widget.guruId,
+          'status': 'hadir',
+          'tanggal': tanggal,
+          'jam_presensi': jamPresensi,
+        });
+      } catch (error) {
+        final message = error.toString().toLowerCase();
+        if (!message.contains('sudah ada')) {
+          debugPrint('Presensi siswa $siswaId gagal disimpan: $error');
+        }
+      }
+    }
   }
 
   List<_StudentAttendance> _filteredStudents(List<_StudentAttendance> source) {
@@ -194,43 +291,73 @@ class _PresensiPageState extends State<PresensiPage> {
                                 fontWeight: FontWeight.w400,
                               ),
                         ),
-                        const Spacer(),
-                        TextButton.icon(
-                          onPressed: () {},
-                          icon: const Icon(Icons.filter_list_rounded, size: 20),
-                          label: const Text('Saring'),
-                          style: TextButton.styleFrom(
-                            foregroundColor: const Color(0xFF1D4ED8),
-                            textStyle: const TextStyle(
-                              fontSize: 16,
-                              fontWeight: FontWeight.w700,
-                            ),
-                          ),
-                        ),
                       ],
                     ),
-                    const SizedBox(height: 12),
-                    SizedBox(
-                      width: double.infinity,
-                      height: 58,
-                      child: FilledButton.icon(
-                        onPressed: _startRealtimePresence,
-                        icon: const Icon(Icons.center_focus_strong_rounded),
-                        label: const Text('Mulai Presensi Semua Siswa'),
-                        style: FilledButton.styleFrom(
-                          backgroundColor: const Color(0xFF2563EB),
-                          foregroundColor: Colors.white,
-                          textStyle: const TextStyle(
-                            fontSize: 16,
-                            fontWeight: FontWeight.w800,
+                    const SizedBox(height: 14),
+                    Container(
+                      padding: const EdgeInsets.all(8),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(20),
+                        border: Border.all(color: const Color(0xFFE1E5F0)),
+                      ),
+                      child: Row(
+                        children: [
+                          Expanded(
+                            flex: 3,
+                            child: SizedBox(
+                              height: 50,
+                              child: FilledButton.icon(
+                                onPressed: _startRealtimePresence,
+                                icon: const Icon(
+                                  Icons.center_focus_strong_rounded,
+                                  size: 20,
+                                ),
+                                label: const Text('Presensi Semua'),
+                                style: FilledButton.styleFrom(
+                                  backgroundColor: const Color(0xFF2563EB),
+                                  foregroundColor: Colors.white,
+                                  textStyle: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(15),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
-                          shape: RoundedRectangleBorder(
-                            borderRadius: BorderRadius.circular(18),
+                          const SizedBox(width: 8),
+                          Expanded(
+                            flex: 2,
+                            child: SizedBox(
+                              height: 50,
+                              child: OutlinedButton.icon(
+                                onPressed: _downloadPresensiExcel,
+                                icon: const Icon(Icons.download_rounded, size: 20),
+                                label: const Text('Excel'),
+                                style: OutlinedButton.styleFrom(
+                                  foregroundColor: const Color(0xFF2563EB),
+                                  side: const BorderSide(
+                                    color: Color(0xFFD9E4FF),
+                                    width: 1.4,
+                                  ),
+                                  textStyle: const TextStyle(
+                                    fontSize: 14,
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                                  shape: RoundedRectangleBorder(
+                                    borderRadius: BorderRadius.circular(15),
+                                  ),
+                                ),
+                              ),
+                            ),
                           ),
-                        ),
+                        ],
                       ),
                     ),
-                    const SizedBox(height: 12),
+                    const SizedBox(height: 16),
                     if (isLoading)
                       const Center(
                         child: Padding(
@@ -276,7 +403,7 @@ class _PresensiPageState extends State<PresensiPage> {
             ],
           ),
           child: Row(
-            mainAxisAlignment: MainAxisAlignment.spaceBetween,
+            mainAxisAlignment: MainAxisAlignment.spaceEvenly,
             children: [
               _PresensiNavItem(
                 icon: Icons.grid_view_rounded,
@@ -285,22 +412,10 @@ class _PresensiPageState extends State<PresensiPage> {
                 onTap: () => Navigator.of(context).pop(),
               ),
               _PresensiNavItem(
-                icon: Icons.center_focus_strong_rounded,
-                label: 'Pindai',
-                isSelected: false,
-                onTap: _startRealtimePresence,
-              ),
-              _PresensiNavItem(
-                icon: Icons.groups_rounded,
-                label: 'Siswa',
-                isSelected: true,
-                onTap: () {},
-              ),
-              _PresensiNavItem(
                 icon: Icons.insert_chart_outlined_rounded,
                 label: 'Rekap',
                 isSelected: false,
-                onTap: () {},
+                onTap: () => Navigator.of(context).pop(presensiPageResultRekap),
               ),
             ],
           ),
@@ -396,15 +511,16 @@ class _StudentCard extends StatelessWidget {
 
     return Container(
       width: double.infinity,
-      padding: const EdgeInsets.fromLTRB(10, 6, 10, 6),
+      padding: const EdgeInsets.fromLTRB(14, 12, 12, 12),
       decoration: BoxDecoration(
         color: Colors.white,
-        borderRadius: BorderRadius.circular(22),
+        borderRadius: BorderRadius.circular(20),
+        border: Border.all(color: const Color(0xFFE8ECF6)),
         boxShadow: const [
           BoxShadow(
-            color: Color(0x0D0B3558),
-            blurRadius: 22,
-            offset: Offset(0, 8),
+            color: Color(0x0A0B3558),
+            blurRadius: 18,
+            offset: Offset(0, 6),
           ),
         ],
       ),
@@ -414,7 +530,7 @@ class _StudentCard extends StatelessWidget {
             clipBehavior: Clip.none,
             children: [
               CircleAvatar(
-                radius: 20,
+                radius: 23,
                 backgroundColor: const Color(0xFFE5E7EB),
                 backgroundImage: imageProvider,
                 child: imageProvider == null
@@ -447,7 +563,7 @@ class _StudentCard extends StatelessWidget {
               ),
             ],
           ),
-          const SizedBox(width: 20),
+          const SizedBox(width: 14),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -456,14 +572,14 @@ class _StudentCard extends StatelessWidget {
                   student.name,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleLarge?.copyWith(
+                  style: Theme.of(context).textTheme.titleMedium?.copyWith(
                         color: const Color(0xFF111827),
-                        fontWeight: FontWeight.w700,
+                        fontWeight: FontWeight.w800,
                       ),
                 ),
-                const SizedBox(height: 9),
+                const SizedBox(height: 7),
                 Wrap(
-                  spacing: 12,
+                  spacing: 10,
                   runSpacing: 6,
                   crossAxisAlignment: WrapCrossAlignment.center,
                   children: [
@@ -480,20 +596,20 @@ class _StudentCard extends StatelessWidget {
               ],
             ),
           ),
-          const SizedBox(width: 12),
+          const SizedBox(width: 10),
           SizedBox(
-            width: 58,
-            height: 58,
+            width: 46,
+            height: 46,
             child: IconButton(
               onPressed: onScan,
               style: IconButton.styleFrom(
                 backgroundColor: const Color(0xFFEFF6FF),
                 foregroundColor: const Color(0xFF2563EB),
                 shape: RoundedRectangleBorder(
-                  borderRadius: BorderRadius.circular(17),
+                  borderRadius: BorderRadius.circular(14),
                 ),
               ),
-              icon: const Icon(Icons.center_focus_strong_rounded, size: 31),
+              icon: const Icon(Icons.center_focus_strong_rounded, size: 25),
               tooltip: 'Pindai wajah siswa',
             ),
           ),
@@ -631,13 +747,19 @@ class _StudentAttendance {
   final _AttendanceStatus status;
   final String? fotoUrl;
 
-  factory _StudentAttendance.fromJson(Map<String, dynamic> json) {
+  factory _StudentAttendance.fromJson(
+    Map<String, dynamic> json, {
+    required Set<int> presentStudentIds,
+  }) {
+    final id = _intFromJson(json['id']) ?? 0;
     return _StudentAttendance(
-      id: _intFromJson(json['id']) ?? 0,
+      id: id,
       name: json['nama']?.toString() ?? '',
       nis: json['nis']?.toString() ?? '-',
       fotoUrl: json['foto_url']?.toString(),
-      status: _AttendanceStatus.alpa,
+      status: presentStudentIds.contains(id)
+          ? _AttendanceStatus.hadir
+          : _AttendanceStatus.alpa,
     );
   }
 
@@ -665,35 +787,119 @@ int? _intFromJson(dynamic value) {
   return int.tryParse(value.toString());
 }
 
-const _fallbackStudents = [
-  _StudentAttendance(
-    id: 1,
-    name: 'Adrian Maulana',
-    nis: '2024001',
-    status: _AttendanceStatus.hadir,
-  ),
-  _StudentAttendance(
-    id: 2,
-    name: 'Bella Safitri',
-    nis: '2024002',
-    status: _AttendanceStatus.alpa,
-  ),
-  _StudentAttendance(
-    id: 3,
-    name: 'Chandra Wijaya',
-    nis: '2024003',
-    status: _AttendanceStatus.hadir,
-  ),
-  _StudentAttendance(
-    id: 4,
-    name: 'Diana Putri',
-    nis: '2024004',
-    status: _AttendanceStatus.hadir,
-  ),
-  _StudentAttendance(
-    id: 5,
-    name: 'Eko Kurniawan',
-    nis: '2024005',
-    status: _AttendanceStatus.alpa,
-  ),
-];
+String _dateKey(DateTime date) {
+  final month = date.month.toString().padLeft(2, '0');
+  final day = date.day.toString().padLeft(2, '0');
+  return '${date.year}-$month-$day';
+}
+
+String _dateLabel(DateTime date) {
+  final day = date.day.toString().padLeft(2, '0');
+  final month = date.month.toString().padLeft(2, '0');
+  return '$day/$month/${date.year}';
+}
+
+String _safeFileName(String value) {
+  final normalized = value.trim().toLowerCase().replaceAll(RegExp(r'\s+'), '_');
+  return normalized.replaceAll(RegExp(r'[^a-z0-9_\-]'), '');
+}
+
+String _excelEscape(String value) {
+  return value
+      .replaceAll('&', '&amp;')
+      .replaceAll('<', '&lt;')
+      .replaceAll('>', '&gt;')
+      .replaceAll('"', '&quot;');
+}
+
+String _buildExcelContent({
+  required List<_StudentAttendance> students,
+  required DateTime date,
+  required String mapel,
+  required String className,
+}) {
+  final buffer = StringBuffer()
+    ..writeln('<html>')
+    ..writeln('<head>')
+    ..writeln('<meta charset="UTF-8">')
+    ..writeln('<style>')
+    ..writeln('table { border-collapse: collapse; font-family: Arial; }')
+    ..writeln('th, td { padding: 8px 12px; }')
+    ..writeln('.hadir { color: #078B4F; font-weight: bold; }')
+    ..writeln('.alpa { color: #CC0000; font-weight: bold; }')
+    ..writeln('</style>')
+    ..writeln('</head>')
+    ..writeln('<body>')
+    ..writeln('<table border="1">')
+    ..writeln(
+      '<tr><th colspan="5">Data Presensi ${_excelEscape(_dateLabel(date))}</th></tr>',
+    )
+    ..writeln(
+      '<tr><td>Mata Pelajaran</td><td colspan="4">${_excelEscape(mapel)}</td></tr>',
+    )
+    ..writeln(
+      '<tr><td>Kelas</td><td colspan="4">${_excelEscape(className)}</td></tr>',
+    )
+    ..writeln(
+      '<tr><td>Tanggal</td><td colspan="4">${_excelEscape(_dateLabel(date))}</td></tr>',
+    )
+    ..writeln(
+      '<tr><th>No</th><th>Nama Siswa</th><th>NIS</th><th>Status</th><th>Keterangan</th></tr>',
+    );
+
+  for (var index = 0; index < students.length; index++) {
+    final student = students[index];
+    final isPresent = student.status == _AttendanceStatus.hadir;
+    buffer.writeln(
+      '<tr>'
+      '<td>${index + 1}</td>'
+      '<td>${_excelEscape(student.name)}</td>'
+      '<td>${_excelEscape(student.nis)}</td>'
+      '<td class="${isPresent ? 'hadir' : 'alpa'}">${isPresent ? 'Hadir' : 'Alpa'}</td>'
+      '<td>${isPresent ? 'Sudah presensi' : 'Belum presensi'}</td>'
+      '</tr>',
+    );
+  }
+
+  buffer
+    ..writeln('</table>')
+    ..writeln('</body>')
+    ..writeln('</html>');
+
+  return buffer.toString();
+}
+
+Future<String> _writeDownloadFile(String fileName, String content) async {
+  if (Platform.isAndroid) {
+    try {
+      const channel = MethodChannel('presensi_app/downloads');
+      final result = await channel.invokeMethod<String>('saveExcel', {
+        'fileName': fileName,
+        'content': content,
+      });
+      if (result != null && result.isNotEmpty) return result;
+    } catch (_) {
+      // Fallback ke penulisan file langsung untuk emulator/perangkat lama.
+    }
+  }
+
+  final candidates = <Directory>[
+    Directory('/storage/emulated/0/Download'),
+    Directory('/storage/emulated/0/Downloads'),
+    Directory.systemTemp,
+  ];
+
+  Object? lastError;
+  for (final directory in candidates) {
+    try {
+      if (!directory.existsSync()) continue;
+      final file = File('${directory.path}/$fileName');
+      final savedFile = await file.writeAsString(content, encoding: utf8, flush: true);
+      return savedFile.path;
+    } catch (error) {
+      lastError = error;
+    }
+  }
+
+  throw Exception(lastError ?? 'Folder download tidak ditemukan');
+}

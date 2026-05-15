@@ -1,5 +1,7 @@
 from sqlalchemy.orm import Session
+from models.embedding import Embedding
 from models.kelas import Kelas
+from models.presensi import Presensi
 from models.siswa import Siswa
 
 
@@ -15,6 +17,7 @@ class SiswaService:
             siswa = Siswa(
                 nama=data.nama,
                 nis=data.nis,
+                jenis_kelamin=data.jenis_kelamin,
                 kelas_id=data.kelas_id,
                 alamat=data.alamat,
                 foto_url=data.foto_url,
@@ -60,6 +63,8 @@ class SiswaService:
                 siswa.nama = data.nama
             if data.nis:
                 siswa.nis = data.nis
+            if "jenis_kelamin" in getattr(data, "model_fields_set", getattr(data, "__fields_set__", set())):
+                siswa.jenis_kelamin = data.jenis_kelamin
             if data.kelas_id:
                 if not db.query(Kelas).filter(Kelas.id == data.kelas_id).first():
                     raise ValueError("Kelas tidak ditemukan")
@@ -86,6 +91,12 @@ class SiswaService:
             if not siswa:
                 return False
 
+            db.query(Embedding).filter(Embedding.siswa_id == siswa_id).delete(
+                synchronize_session=False
+            )
+            db.query(Presensi).filter(Presensi.siswa_id == siswa_id).delete(
+                synchronize_session=False
+            )
             db.delete(siswa)
             db.commit()
             return True

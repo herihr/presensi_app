@@ -30,12 +30,25 @@ class EmbeddingService:
     # 🔹 GET ALL EMBEDDINGS
     @staticmethod
     def get_all_embeddings(db: Session):
-        return db.query(Embedding).all()
+        return (
+            db.query(Embedding)
+            .join(Siswa, Embedding.siswa_id == Siswa.id)
+            .filter(Embedding.siswa_id.isnot(None))
+            .all()
+        )
 
     # 🔹 GET EMBEDDING BY ID
     @staticmethod
     def get_embedding_by_id(db: Session, embedding_id: int):
-        return db.query(Embedding).filter(Embedding.id == embedding_id).first()
+        return (
+            db.query(Embedding)
+            .join(Siswa, Embedding.siswa_id == Siswa.id)
+            .filter(
+                Embedding.id == embedding_id,
+                Embedding.siswa_id.isnot(None),
+            )
+            .first()
+        )
 
     # 🔹 GET EMBEDDING BY SISWA
     @staticmethod

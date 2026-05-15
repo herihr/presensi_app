@@ -7,6 +7,16 @@ from models.mata_pelajaran import MataPelajaran
 
 
 class JadwalService:
+    _DAY_LABELS = {
+        "senin": "Senin",
+        "selasa": "Selasa",
+        "rabu": "Rabu",
+        "kamis": "Kamis",
+        "jumat": "Jumat",
+        "jum'at": "Jumat",
+        "sabtu": "Sabtu",
+        "minggu": "Minggu",
+    }
 
     # 🔹 CREATE JADWAL
     @staticmethod
@@ -84,35 +94,55 @@ class JadwalService:
     # 🔹 GET ALL JADWAL
     @staticmethod
     def get_all_jadwal(db: Session):
-        return db.query(Jadwal).all()
+        jadwal = (
+            db.query(Jadwal)
+            .filter(
+                Jadwal.kelas_id.isnot(None),
+                Jadwal.mapel_id.isnot(None),
+                Jadwal.guru_id.isnot(None),
+            )
+            .all()
+        )
+        JadwalService._normalize_result_days(jadwal)
+        return jadwal
 
     # 🔹 GET JADWAL BY ID
     @staticmethod
     def get_jadwal_by_id(db: Session, jadwal_id: int):
-        return db.query(Jadwal).filter(Jadwal.id == jadwal_id).first()
+        jadwal = db.query(Jadwal).filter(Jadwal.id == jadwal_id).first()
+        JadwalService._normalize_result_days([jadwal] if jadwal else [])
+        return jadwal
 
     # 🔹 GET JADWAL BY KELAS
     @staticmethod
     def get_jadwal_by_kelas(db: Session, kelas_id: int):
-        return db.query(Jadwal).filter(Jadwal.kelas_id == kelas_id).all()
+        jadwal = db.query(Jadwal).filter(Jadwal.kelas_id == kelas_id).all()
+        JadwalService._normalize_result_days(jadwal)
+        return jadwal
 
     # 🔹 GET JADWAL BY GURU
     @staticmethod
     def get_jadwal_by_guru(db: Session, guru_id: int):
-        return db.query(Jadwal).filter(Jadwal.guru_id == guru_id).all()
+        jadwal = db.query(Jadwal).filter(Jadwal.guru_id == guru_id).all()
+        JadwalService._normalize_result_days(jadwal)
+        return jadwal
 
     # 🔹 GET JADWAL BY HARI
     @staticmethod
     def get_jadwal_by_hari(db: Session, kelas_id: int, hari: str):
-        return db.query(Jadwal).filter(
+        jadwal = db.query(Jadwal).filter(
             Jadwal.kelas_id == kelas_id,
             Jadwal.hari == hari
         ).all()
+        JadwalService._normalize_result_days(jadwal)
+        return jadwal
 
     # 🔹 GET JADWAL BY MAPEL
     @staticmethod
     def get_jadwal_by_mapel(db: Session, mapel_id: int):
-        return db.query(Jadwal).filter(Jadwal.mapel_id == mapel_id).all()
+        jadwal = db.query(Jadwal).filter(Jadwal.mapel_id == mapel_id).all()
+        JadwalService._normalize_result_days(jadwal)
+        return jadwal
 
     # 🔹 UPDATE JADWAL
     @staticmethod
@@ -237,3 +267,11 @@ class JadwalService:
     @staticmethod
     def _times_overlap(start_a: str, end_a: str, start_b: str, end_b: str):
         return start_a < end_b and end_a > start_b
+
+    @staticmethod
+    def _normalize_result_days(jadwal_list):
+        for jadwal in jadwal_list:
+            raw = (jadwal.hari or "").strip()
+            normalized = JadwalService._DAY_LABELS.get(raw.lower())
+            if normalized:
+                jadwal.hari = normalized

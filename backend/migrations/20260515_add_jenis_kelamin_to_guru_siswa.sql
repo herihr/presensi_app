@@ -1,0 +1,5 @@
+ALTER TABLE guru
+  ADD COLUMN jenis_kelamin VARCHAR(20) NULL AFTER nama;
+
+ALTER TABLE siswa
+  ADD COLUMN jenis_kelamin VARCHAR(20) NULL AFTER nis;

@@ -10,7 +10,6 @@ from models import siswa
 from models import admin
 from models import kelas
 from models import mata_pelajaran
-from models import kelas_mapel
 from models import guru_mapel
 from models import jadwal
 from models import presensi

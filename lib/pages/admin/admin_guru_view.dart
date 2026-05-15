@@ -225,6 +225,7 @@ class _TambahGuruPageState extends State<TambahGuruPage> {
   bool _isPickingPhoto = false;
   bool _obscurePassword = true;
   String? _selectedFotoPath;
+  String? _selectedJenisKelamin;
   final Set<int> _selectedMapelIds = {};
   int? _selectedKelasId;
   List<_OptionItem> _mapelOptions = const [];
@@ -241,6 +242,7 @@ class _TambahGuruPageState extends State<TambahGuruPage> {
       _nipController.text = guru.nip;
       _emailController.text = guru.email;
       _selectedFotoPath = guru.fotoUrl;
+      _selectedJenisKelamin = guru.jenisKelamin;
       _selectedMapelIds.addAll(guru.mapelIds);
       _selectedKelasId = guru.kelasAsuhIds.isEmpty ? null : guru.kelasAsuhIds.first;
     }
@@ -347,6 +349,7 @@ class _TambahGuruPageState extends State<TambahGuruPage> {
       final payload = {
         'nama': _namaController.text.trim(),
         'nip': _nipController.text.trim(),
+        'jenis_kelamin': _selectedJenisKelamin,
         'email': _emailController.text.trim(),
         'foto_url': _selectedFotoPath,
         'mapel_ids': mapelIds,
@@ -440,6 +443,31 @@ class _TambahGuruPageState extends State<TambahGuruPage> {
                       icon: Icons.badge_rounded,
                       keyboardType: TextInputType.number,
                       validator: _requiredValidator,
+                    ),
+                    const SizedBox(height: 14),
+                    DropdownButtonFormField<String>(
+                      value: _selectedJenisKelamin,
+                      decoration: _inputDecoration(
+                        label: 'Jenis Kelamin',
+                        icon: Icons.wc_rounded,
+                      ),
+                      items: _genderOptions
+                          .map(
+                            (item) => DropdownMenuItem<String>(
+                              value: item,
+                              child: Text(item),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        setState(() => _selectedJenisKelamin = value);
+                      },
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Jenis kelamin wajib dipilih';
+                        }
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 14),
                     _TextField(
@@ -1071,6 +1099,11 @@ class _GuruCardState extends State<_GuruCard> {
                                 maxWidth: 118,
                               ),
                               _TinyMeta(
+                                icon: Icons.wc_rounded,
+                                label: _genderLabel(guru.jenisKelamin),
+                                maxWidth: 112,
+                              ),
+                              _TinyMeta(
                                 icon: Icons.menu_book_rounded,
                                 label: '${guru.mapelIds.length} mapel',
                                 maxWidth: 82,
@@ -1384,6 +1417,7 @@ class _GuruItem {
     List<int>? mapelIds,
     List<int>? kelasAsuhIds,
     this.fotoUrl,
+    this.jenisKelamin,
   })  : _mapelIds = mapelIds,
         _kelasAsuhIds = kelasAsuhIds;
 
@@ -1391,6 +1425,7 @@ class _GuruItem {
   final String nama;
   final String email;
   final String nip;
+  final String? jenisKelamin;
   final List<int>? _mapelIds;
   final List<int>? _kelasAsuhIds;
   final String? fotoUrl;
@@ -1404,6 +1439,7 @@ class _GuruItem {
       nama: json['nama'] ?? '',
       email: json['email'] ?? '',
       nip: json['nip'] ?? '',
+      jenisKelamin: _normalizeGender(json['jenis_kelamin']),
       mapelIds: _intListFromJson(json, 'mapel_ids', 'mapel_id'),
       kelasAsuhIds: _intListFromJson(json, 'kelas_asuh_ids', 'kelas_asuh_id'),
       fotoUrl: json['foto_url'],
@@ -1470,6 +1506,19 @@ int? _intFromJson(dynamic value) {
   if (value == null) return null;
   if (value is int) return value;
   return int.tryParse(value.toString());
+}
+
+const _genderOptions = ['Laki-laki', 'Perempuan'];
+
+String _genderLabel(String? value) {
+  if (value == null || value.trim().isEmpty) return 'Belum diisi';
+  return value;
+}
+
+String? _normalizeGender(dynamic value) {
+  if (value == null) return null;
+  final text = value.toString().trim();
+  return _genderOptions.contains(text) ? text : null;
 }
 
 const _fallbackMapelOptions = [

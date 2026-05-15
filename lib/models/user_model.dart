@@ -3,6 +3,7 @@ import 'dart:convert';
 class User {
   final int id;
   final String nama;
+  final String? jenisKelamin;
   final String email;
   final String? fotoUrl;
   final String role;
@@ -14,6 +15,7 @@ class User {
   User({
     required this.id,
     required this.nama,
+    this.jenisKelamin,
     required this.email,
     this.fotoUrl,
     required this.role,
@@ -27,6 +29,7 @@ class User {
     return User(
       id: _intFromJson(json['id']),
       nama: json['nama']?.toString() ?? '',
+      jenisKelamin: _nullableStringFromJson(json['jenis_kelamin']),
       email: json['email'] ?? '',
       fotoUrl: json['foto_url']?.toString(),
       role: json['role']?.toString() ?? '',
@@ -43,6 +46,7 @@ class User {
     return User(
       id: _intFromJson(userJson['id']),
       nama: userJson['nama']?.toString() ?? '',
+      jenisKelamin: _nullableStringFromJson(userJson['jenis_kelamin']),
       email: userJson['email']?.toString() ?? '',
       fotoUrl: userJson['foto_url']?.toString(),
       role: userJson['role']?.toString() ?? '',
@@ -59,6 +63,7 @@ class User {
   User copyWith({
     int? id,
     String? nama,
+    String? jenisKelamin,
     String? email,
     String? fotoUrl,
     String? role,
@@ -70,6 +75,7 @@ class User {
     return User(
       id: id ?? this.id,
       nama: nama ?? this.nama,
+      jenisKelamin: jenisKelamin ?? this.jenisKelamin,
       email: email ?? this.email,
       fotoUrl: fotoUrl ?? this.fotoUrl,
       role: role ?? this.role,
@@ -79,6 +85,12 @@ class User {
       tokenType: tokenType ?? this.tokenType,
     );
   }
+}
+
+String? _nullableStringFromJson(dynamic value) {
+  if (value == null) return null;
+  final text = value.toString().trim();
+  return text.isEmpty ? null : text;
 }
 
 Map<String, dynamic> _mapFromJson(dynamic value, {required String fieldName}) {

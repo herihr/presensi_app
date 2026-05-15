@@ -58,6 +58,22 @@ class _AdminJadwalViewState extends State<AdminJadwalView> {
     }
   }
 
+  Future<void> _openEditDay(List<_JadwalItem> schedules) async {
+    if (schedules.isEmpty) return;
+
+    final updated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => TambahJadwalPage(initialSchedules: schedules),
+      ),
+    );
+
+    if (updated == true && mounted) {
+      setState(() {
+        _jadwalFuture = _loadJadwal();
+      });
+    }
+  }
+
   Future<void> _deleteJadwal(_JadwalItem jadwal) async {
     final confirmed = await AppAlert.confirm(
       context: context,
@@ -180,28 +196,10 @@ class _AdminJadwalViewState extends State<AdminJadwalView> {
                     );
                   }
 
-                  final sorted = [...data.jadwal]
-                    ..sort((a, b) {
-                      final dayCompare = _dayIndex(a.hari).compareTo(_dayIndex(b.hari));
-                      if (dayCompare != 0) return dayCompare;
-                      return a.jamMulai.compareTo(b.jamMulai);
-                    });
-
-                  return Column(
-                    children: sorted
-                        .map(
-                          (item) => Padding(
-                            padding: const EdgeInsets.only(bottom: 12),
-                            child: _JadwalCard(
-                              jadwal: item,
-                              kelasName: data.labelForKelas(item.kelasId),
-                              mapelName: data.labelForMapel(item.mapelId),
-                              guruName: data.labelForGuru(item.guruId),
-                              onDelete: () => _deleteJadwal(item),
-                            ),
-                          ),
-                        )
-                        .toList(),
+                  return _JadwalGroupedTabs(
+                    data: data,
+                    onDelete: _deleteJadwal,
+                    onEditDay: _openEditDay,
                   );
                 },
               ),
@@ -215,7 +213,12 @@ class _AdminJadwalViewState extends State<AdminJadwalView> {
 }
 
 class TambahJadwalPage extends StatefulWidget {
-  const TambahJadwalPage({super.key});
+  const TambahJadwalPage({
+    super.key,
+    this.initialSchedules = const [],
+  });
+
+  final List<_JadwalItem> initialSchedules;
 
   @override
   State<TambahJadwalPage> createState() => _TambahJadwalPageState();
@@ -234,12 +237,22 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
   int _breakAfterIndex = 0;
   List<_OptionItem> _kelasOptions = const [];
   List<_OptionItem> _mapelOptions = const [];
-  final List<_ScheduleEntry> _entries = [_ScheduleEntry()];
+  final List<_ScheduleEntry> _entries = [];
   final Map<int, List<_GuruOption>> _guruByMapel = {};
+  late final List<_JadwalItem> _initialSchedules;
+
+  bool get _isEditMode => _initialSchedules.isNotEmpty;
 
   @override
   void initState() {
     super.initState();
+    _initialSchedules = [...widget.initialSchedules]
+      ..sort((a, b) => a.jamMulai.compareTo(b.jamMulai));
+    if (_isEditMode) {
+      _hydrateFromInitialSchedules();
+    } else {
+      _entries.add(_ScheduleEntry());
+    }
     _loadOptions();
   }
 
@@ -266,11 +279,37 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
             .toList();
         _isLoadingOptions = false;
       });
+      for (final entry in _entries) {
+        final mapelId = entry.mapelId;
+        if (mapelId != null) {
+          await _loadGuruForMapel(mapelId);
+        }
+      }
     } catch (error) {
       if (!mounted) return;
       setState(() => _isLoadingOptions = false);
       _showError(error.toString().replaceFirst('Exception: ', ''));
     }
+  }
+
+  void _hydrateFromInitialSchedules() {
+    final first = _initialSchedules.first;
+    _selectedKelasId = first.kelasId;
+    _selectedHari = first.hari;
+    _jamMulaiController.text = first.jamMulai;
+    _jumlahMapel = _initialSchedules.length;
+    _entries
+      ..clear()
+      ..addAll(
+        _initialSchedules.map(
+          (item) => _ScheduleEntry(
+            mapelId: item.mapelId,
+            guruId: item.guruId,
+            lessonHours: _lessonHoursFromSchedule(item),
+          ),
+        ),
+      );
+    _breakAfterIndex = _breakIndexFromSchedules(_initialSchedules);
   }
 
   Future<void> _loadGuruForMapel(int mapelId) async {
@@ -397,12 +436,31 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
       }
 
       try {
-        await _api.post('/api/jadwal/batch', {
-          'items': items,
-        });
+        if (_isEditMode) {
+          for (var index = 0; index < items.length; index++) {
+            if (index < _initialSchedules.length) {
+              await _api.put(
+                '/api/jadwal/${_initialSchedules[index].id}',
+                items[index],
+              );
+            } else {
+              await _api.post('/api/jadwal/', items[index]);
+            }
+          }
+
+          if (_initialSchedules.length > items.length) {
+            for (final item in _initialSchedules.skip(items.length)) {
+              await _api.delete('/api/jadwal/${item.id}');
+            }
+          }
+        } else {
+          await _api.post('/api/jadwal/batch', {
+            'items': items,
+          });
+        }
       } catch (error) {
         final message = error.toString();
-        if (!message.contains('Method Not Allowed')) {
+        if (_isEditMode || !message.contains('Method Not Allowed')) {
           rethrow;
         }
 
@@ -415,7 +473,9 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
       await AppAlert.success(
         context,
         title: 'Berhasil',
-        message: 'Jadwal berhasil ditambahkan.',
+        message: _isEditMode
+            ? 'Jadwal berhasil diperbarui.'
+            : 'Jadwal berhasil ditambahkan.',
       );
       Navigator.of(context).pop(true);
     } catch (error) {
@@ -441,7 +501,7 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
     return Scaffold(
       backgroundColor: const Color(0xFFFAF8FF),
       appBar: AppBar(
-        title: const Text('Tambah Jadwal'),
+        title: Text(_isEditMode ? 'Edit Jadwal' : 'Tambah Jadwal'),
         backgroundColor: Colors.white,
         foregroundColor: const Color(0xFF191B23),
         elevation: 1,
@@ -862,17 +922,370 @@ class _PreviewRow extends StatelessWidget {
   }
 }
 
-class _JadwalCard extends StatelessWidget {
-  const _JadwalCard({
-    required this.jadwal,
+class _JadwalGroupedTabs extends StatefulWidget {
+  const _JadwalGroupedTabs({
+    required this.data,
+    required this.onDelete,
+    required this.onEditDay,
+  });
+
+  final _JadwalData data;
+  final ValueChanged<_JadwalItem> onDelete;
+  final ValueChanged<List<_JadwalItem>> onEditDay;
+
+  @override
+  State<_JadwalGroupedTabs> createState() => _JadwalGroupedTabsState();
+}
+
+class _JadwalGroupedTabsState extends State<_JadwalGroupedTabs> {
+  int _selectedGrade = 7;
+
+  @override
+  Widget build(BuildContext context) {
+    final schedulesByGrade = <int, List<_JadwalItem>>{
+      7: [],
+      8: [],
+      9: [],
+    };
+
+    for (final item in widget.data.jadwal) {
+      final kelasName = widget.data.labelForKelas(item.kelasId);
+      final grade = _gradeFromClassName(kelasName);
+      if (grade != null) {
+        schedulesByGrade[grade]?.add(item);
+      }
+    }
+
+    final selectedItems =
+        schedulesByGrade[_selectedGrade] ?? const <_JadwalItem>[];
+
+    return Column(
+      crossAxisAlignment: CrossAxisAlignment.start,
+      children: [
+        _GradeTabBar(
+          selectedGrade: _selectedGrade,
+          counts: {
+            for (final entry in schedulesByGrade.entries)
+              entry.key: entry.value.length,
+          },
+          onChanged: (grade) {
+            setState(() => _selectedGrade = grade);
+          },
+        ),
+        const SizedBox(height: 18),
+        if (selectedItems.isEmpty)
+          _DataPanel(
+            child: _EmptyState(
+              icon: Icons.event_busy_rounded,
+              title: 'Belum ada jadwal kelas $_selectedGrade',
+              description:
+                  'Tambahkan jadwal untuk kelas $_selectedGrade agar tampil di bagian ini.',
+            ),
+          )
+        else
+          ..._buildClassGroups(selectedItems).map(
+            (group) => Padding(
+              padding: const EdgeInsets.only(bottom: 14),
+              child: _JadwalClassGroupCard(
+                kelasName: widget.data.labelForKelas(group.kelasId),
+                schedules: group.items,
+                data: widget.data,
+                onDelete: widget.onDelete,
+                onEditDay: widget.onEditDay,
+              ),
+            ),
+          ),
+      ],
+    );
+  }
+
+  List<_JadwalClassGroup> _buildClassGroups(List<_JadwalItem> items) {
+    final grouped = <int, List<_JadwalItem>>{};
+    for (final item in items) {
+      grouped.putIfAbsent(item.kelasId, () => []).add(item);
+    }
+
+    final groups = grouped.entries
+        .map((entry) => _JadwalClassGroup(kelasId: entry.key, items: entry.value))
+        .toList()
+      ..sort((a, b) => widget.data
+          .labelForKelas(a.kelasId)
+          .compareTo(widget.data.labelForKelas(b.kelasId)));
+
+    for (final group in groups) {
+      group.items.sort((a, b) {
+        final dayCompare = _dayIndex(a.hari).compareTo(_dayIndex(b.hari));
+        if (dayCompare != 0) return dayCompare;
+        return a.jamMulai.compareTo(b.jamMulai);
+      });
+    }
+
+    return groups;
+  }
+}
+
+class _GradeTabBar extends StatelessWidget {
+  const _GradeTabBar({
+    required this.selectedGrade,
+    required this.counts,
+    required this.onChanged,
+  });
+
+  final int selectedGrade;
+  final Map<int, int> counts;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF3FF),
+        borderRadius: BorderRadius.circular(16),
+        border: Border.all(color: const Color(0xFFC3C6D7).withOpacity(0.35)),
+      ),
+      child: Row(
+        children: [7, 8, 9].map((grade) {
+          final isSelected = selectedGrade == grade;
+          return Expanded(
+            child: Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 2),
+              child: InkWell(
+                borderRadius: BorderRadius.circular(12),
+                onTap: () => onChanged(grade),
+                child: AnimatedContainer(
+                  duration: const Duration(milliseconds: 180),
+                  padding: const EdgeInsets.symmetric(vertical: 12),
+                  decoration: BoxDecoration(
+                    color: isSelected ? Colors.white : Colors.transparent,
+                    borderRadius: BorderRadius.circular(12),
+                    boxShadow: isSelected
+                        ? [
+                            BoxShadow(
+                              color: const Color(0xFF2563EB).withOpacity(0.12),
+                              blurRadius: 12,
+                              offset: const Offset(0, 5),
+                            ),
+                          ]
+                        : null,
+                  ),
+                  child: Column(
+                    mainAxisSize: MainAxisSize.min,
+                    children: [
+                      Text(
+                        'Kelas $grade',
+                        style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                              fontWeight: FontWeight.w800,
+                              color: isSelected
+                                  ? const Color(0xFF2563EB)
+                                  : const Color(0xFF737686),
+                            ),
+                      ),
+                      const SizedBox(height: 3),
+                      Text(
+                        '${counts[grade] ?? 0} jadwal',
+                        style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                              color: const Color(0xFF737686),
+                            ),
+                      ),
+                    ],
+                  ),
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _JadwalClassGroupCard extends StatelessWidget {
+  const _JadwalClassGroupCard({
     required this.kelasName,
+    required this.schedules,
+    required this.data,
+    required this.onDelete,
+    required this.onEditDay,
+  });
+
+  final String kelasName;
+  final List<_JadwalItem> schedules;
+  final _JadwalData data;
+  final ValueChanged<_JadwalItem> onDelete;
+  final ValueChanged<List<_JadwalItem>> onEditDay;
+
+  @override
+  Widget build(BuildContext context) {
+    final byDay = <String, List<_JadwalItem>>{};
+    for (final item in schedules) {
+      byDay.putIfAbsent(item.hari, () => []).add(item);
+    }
+
+    final days = byDay.keys.toList()
+      ..sort((a, b) => _dayIndex(a).compareTo(_dayIndex(b)));
+
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(16),
+      decoration: BoxDecoration(
+        color: Colors.white,
+        border: Border.all(color: const Color(0xFFC3C6D7).withOpacity(0.5)),
+        borderRadius: BorderRadius.circular(18),
+        boxShadow: [
+          BoxShadow(
+            color: const Color(0xFF111827).withOpacity(0.04),
+            blurRadius: 18,
+            offset: const Offset(0, 10),
+          ),
+        ],
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              Container(
+                width: 46,
+                height: 46,
+                decoration: BoxDecoration(
+                  color: const Color(0xFFEFF6FF),
+                  borderRadius: BorderRadius.circular(14),
+                ),
+                child: const Icon(
+                  Icons.class_rounded,
+                  color: Color(0xFF2563EB),
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      kelasName,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.titleMedium?.copyWith(
+                            fontWeight: FontWeight.w900,
+                            color: const Color(0xFF191B23),
+                          ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      '${schedules.length} jadwal pelajaran',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF737686),
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+          const SizedBox(height: 16),
+          ...days.map((day) {
+            final daySchedules = byDay[day]!
+              ..sort((a, b) => a.jamMulai.compareTo(b.jamMulai));
+            return Padding(
+              padding: EdgeInsets.only(bottom: day == days.last ? 0 : 14),
+              child: _JadwalDaySection(
+                day: day,
+                schedules: daySchedules,
+                data: data,
+                onDelete: onDelete,
+                onEdit: () => onEditDay(daySchedules),
+              ),
+            );
+          }),
+        ],
+      ),
+    );
+  }
+}
+
+class _JadwalDaySection extends StatelessWidget {
+  const _JadwalDaySection({
+    required this.day,
+    required this.schedules,
+    required this.data,
+    required this.onDelete,
+    required this.onEdit,
+  });
+
+  final String day;
+  final List<_JadwalItem> schedules;
+  final _JadwalData data;
+  final ValueChanged<_JadwalItem> onDelete;
+  final VoidCallback onEdit;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(12),
+      decoration: BoxDecoration(
+        color: const Color(0xFFF8FAFF),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(color: const Color(0xFFC3C6D7).withOpacity(0.35)),
+      ),
+      child: Column(
+        crossAxisAlignment: CrossAxisAlignment.start,
+        children: [
+          Row(
+            children: [
+              const Icon(
+                Icons.calendar_month_rounded,
+                size: 18,
+                color: Color(0xFF2563EB),
+              ),
+              const SizedBox(width: 8),
+              Text(
+                day,
+                style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                      fontWeight: FontWeight.w900,
+                      color: const Color(0xFF191B23),
+                    ),
+              ),
+              const Spacer(),
+              IconButton(
+                onPressed: onEdit,
+                icon: const Icon(Icons.edit_rounded),
+                color: const Color(0xFF2563EB),
+                tooltip: 'Edit jadwal hari $day',
+                visualDensity: VisualDensity.compact,
+              ),
+            ],
+          ),
+          const SizedBox(height: 10),
+          ...schedules.map(
+            (item) => Padding(
+              padding: EdgeInsets.only(
+                bottom: item == schedules.last ? 0 : 10,
+              ),
+              child: _JadwalMiniCard(
+                jadwal: item,
+                mapelName: data.labelForMapel(item.mapelId),
+                guruName: data.labelForGuru(item.guruId),
+                onDelete: () => onDelete(item),
+              ),
+            ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _JadwalMiniCard extends StatelessWidget {
+  const _JadwalMiniCard({
+    required this.jadwal,
     required this.mapelName,
     required this.guruName,
     required this.onDelete,
   });
 
   final _JadwalItem jadwal;
-  final String kelasName;
   final String mapelName;
   final String guruName;
   final VoidCallback onDelete;
@@ -880,37 +1293,38 @@ class _JadwalCard extends StatelessWidget {
   @override
   Widget build(BuildContext context) {
     return Container(
-      padding: const EdgeInsets.all(16),
+      padding: const EdgeInsets.all(12),
       decoration: BoxDecoration(
         color: Colors.white,
-        border: Border.all(color: const Color(0xFFC3C6D7).withOpacity(0.5)),
-        borderRadius: BorderRadius.circular(14),
+        borderRadius: BorderRadius.circular(12),
+        border: Border.all(color: const Color(0xFFC3C6D7).withOpacity(0.35)),
       ),
       child: Row(
         children: [
           Container(
-            width: 52,
-            height: 52,
+            width: 40,
+            height: 40,
             decoration: const BoxDecoration(
               shape: BoxShape.circle,
               color: Color(0xFFEFF6FF),
             ),
             child: const Icon(
-              Icons.schedule_rounded,
+              Icons.menu_book_rounded,
+              size: 20,
               color: Color(0xFF2563EB),
             ),
           ),
-          const SizedBox(width: 14),
+          const SizedBox(width: 12),
           Expanded(
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
               children: [
                 Text(
-                  '$kelasName - $mapelName',
+                  mapelName,
                   maxLines: 1,
                   overflow: TextOverflow.ellipsis,
-                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                        fontWeight: FontWeight.w800,
+                  style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                        fontWeight: FontWeight.w900,
                         color: const Color(0xFF191B23),
                       ),
                 ),
@@ -925,26 +1339,37 @@ class _JadwalCard extends StatelessWidget {
                 ),
                 const SizedBox(height: 4),
                 Text(
-                  '${jadwal.hari} | ${jadwal.jamMulai} - ${jadwal.jamSelesai}',
-                  maxLines: 1,
-                  overflow: TextOverflow.ellipsis,
+                  '${jadwal.jamMulai} - ${jadwal.jamSelesai}',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF737686),
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF2563EB),
                       ),
                 ),
               ],
             ),
           ),
-          IconButton.filledTonal(
+          const SizedBox(width: 6),
+          IconButton(
             onPressed: onDelete,
-            icon: const Icon(Icons.delete_rounded),
+            icon: const Icon(Icons.delete_outline_rounded),
             color: const Color(0xFFDC2626),
             tooltip: 'Hapus jadwal',
+            visualDensity: VisualDensity.compact,
           ),
         ],
       ),
     );
   }
+}
+
+class _JadwalClassGroup {
+  const _JadwalClassGroup({
+    required this.kelasId,
+    required this.items,
+  });
+
+  final int kelasId;
+  final List<_JadwalItem> items;
 }
 
 class _SectionCard extends StatelessWidget {
@@ -1138,9 +1563,15 @@ class _JadwalItem {
 }
 
 class _ScheduleEntry {
+  _ScheduleEntry({
+    this.mapelId,
+    this.guruId,
+    this.lessonHours = 1,
+  });
+
   int? mapelId;
   int? guruId;
-  int lessonHours = 1;
+  int lessonHours;
 }
 
 class _SchedulePreview {
@@ -1217,6 +1648,49 @@ int _intFromJson(dynamic value) {
 int _dayIndex(String day) {
   final index = _days.indexOf(day);
   return index == -1 ? 99 : index;
+}
+
+int _lessonHoursFromSchedule(_JadwalItem item) {
+  final start = _parseTime(item.jamMulai);
+  final end = _parseTime(item.jamSelesai);
+  if (start == null || end == null) return 1;
+
+  final minutes = end.difference(start).inMinutes;
+  if (minutes <= 0) return 1;
+  return (minutes / 40).round().clamp(1, 8).toInt();
+}
+
+int _breakIndexFromSchedules(List<_JadwalItem> schedules) {
+  if (schedules.length <= 1) return 0;
+
+  for (var index = 0; index < schedules.length - 1; index++) {
+    final currentEnd = _parseTime(schedules[index].jamSelesai);
+    final nextStart = _parseTime(schedules[index + 1].jamMulai);
+    if (currentEnd == null || nextStart == null) continue;
+    if (nextStart.difference(currentEnd).inMinutes >= 30) {
+      return index;
+    }
+  }
+
+  return 0;
+}
+
+int? _gradeFromClassName(String name) {
+  final normalized = name.trim().toUpperCase();
+  if (normalized.isEmpty) return null;
+
+  final firstToken = normalized.split(RegExp(r'\s+')).first;
+  if (firstToken == 'VII' || firstToken == '7') return 7;
+  if (firstToken == 'VIII' || firstToken == '8') return 8;
+  if (firstToken == 'IX' || firstToken == '9') return 9;
+
+  if (RegExp(r'\bVII\b').hasMatch(normalized)) return 7;
+  if (RegExp(r'\bVIII\b').hasMatch(normalized)) return 8;
+  if (RegExp(r'\bIX\b').hasMatch(normalized)) return 9;
+  if (RegExp(r'\b7\b').hasMatch(normalized)) return 7;
+  if (RegExp(r'\b8\b').hasMatch(normalized)) return 8;
+  if (RegExp(r'\b9\b').hasMatch(normalized)) return 9;
+  return null;
 }
 
 const _days = [

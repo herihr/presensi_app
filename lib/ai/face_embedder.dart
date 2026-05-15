@@ -1,13 +1,17 @@
 import 'dart:io';
 import 'dart:math';
+import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 import 'package:tflite_flutter/tflite_flutter.dart';
 
 class FaceEmbedder {
-  static const _modelPath = 'lib/assets/mobilefacenet.tflite';
+  static const modelPath = 'lib/assets/mobilefacenet.tflite';
 
+  FaceEmbedder({Uint8List? modelBytes}) : _modelBytes = modelBytes;
+
+  final Uint8List? _modelBytes;
   Interpreter? _interpreter;
   bool _hasLoggedModelInfo = false;
 
@@ -66,7 +70,10 @@ class FaceEmbedder {
     if (existing != null) return existing;
 
     final options = InterpreterOptions()..threads = 2;
-    final interpreter = await Interpreter.fromAsset(_modelPath, options: options);
+    final bytes = _modelBytes;
+    final interpreter = bytes == null
+        ? await Interpreter.fromAsset(modelPath, options: options)
+        : Interpreter.fromBuffer(bytes, options: options);
     _interpreter = interpreter;
     return interpreter;
   }

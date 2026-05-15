@@ -3,7 +3,7 @@ from core.security import hash_password
 
 # 🔥 IMPORT SEMUA MODEL (penting untuk relationship)
 from models import admin, guru, siswa, kelas, mata_pelajaran, jadwal, presensi, embedding
-from models import guru_mapel, kelas_mapel
+from models import guru_mapel
 
 from models.admin import Admin
 from models.guru import Guru

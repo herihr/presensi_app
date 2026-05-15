@@ -2,9 +2,11 @@ import 'dart:io';
 
 import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
+import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
 import '../../ai/face_embedder.dart';
+import '../../ai/realtime_face_detector.dart';
 import '../../services/api_service.dart';
 import '../../utils/app_alert.dart';
 
@@ -56,7 +58,8 @@ class _AdminSiswaViewState extends State<AdminSiswaView> {
     final confirmed = await AppAlert.confirm(
       context: context,
       title: 'Hapus Siswa',
-      message: 'Hapus data ${siswa.nama}?',
+      message:
+          'Hapus data ${siswa.nama}? Data embedding wajah dan riwayat presensi siswa ini juga akan dihapus.',
       confirmText: 'Hapus',
     );
 
@@ -221,11 +224,13 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
   final _alamatController = TextEditingController();
   final _imagePicker = ImagePicker();
   final _faceEmbedder = FaceEmbedder();
+  final _faceDetector = RealtimeFaceDetector();
 
   bool _isLoading = false;
   bool _isPickingPhoto = false;
   bool _isPickingEmbeddingPhotos = false;
   String? _selectedFotoPath;
+  String? _selectedJenisKelamin;
   final List<String> _embeddingPhotoPaths = [];
   int? _selectedKelasId;
   String _currentEmbeddingStatus = 'belum_diproses';
@@ -242,6 +247,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
       _nisController.text = siswa.nis;
       _alamatController.text = siswa.alamat ?? '';
       _selectedFotoPath = siswa.fotoUrl;
+      _selectedJenisKelamin = siswa.jenisKelamin;
       _selectedKelasId = siswa.kelasId;
       _currentEmbeddingStatus = siswa.embeddingStatus;
     }
@@ -254,6 +260,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
     _nisController.dispose();
     _alamatController.dispose();
     _faceEmbedder.close();
+    _faceDetector.close();
     super.dispose();
   }
 
@@ -368,6 +375,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
       final payload = <String, dynamic>{
         'nama': _namaController.text.trim(),
         'nis': _nisController.text.trim(),
+        'jenis_kelamin': _selectedJenisKelamin,
         'kelas_id': _selectedKelasId,
         'alamat': _alamatController.text.trim().isEmpty
             ? null
@@ -417,7 +425,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
         if (fotoPath.startsWith('http://') || fotoPath.startsWith('https://')) {
           continue;
         }
-        final embedding = await _faceEmbedder.embedImageFile(fotoPath);
+        final embedding = await _createEmbeddingFromDetectedFace(fotoPath);
         await _api.post('/api/embedding/', {
           'siswa_id': siswaId,
           'embedding': embedding,
@@ -433,6 +441,34 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
       });
       throw Exception('Data siswa tersimpan, tetapi embedding gagal: $error');
     }
+  }
+
+  Future<List<double>> _createEmbeddingFromDetectedFace(String fotoPath) async {
+    final bytes = await File(fotoPath).readAsBytes();
+    final decoded = img.decodeImage(bytes);
+    if (decoded == null) {
+      throw Exception('Foto embedding tidak bisa dibaca');
+    }
+
+    await _faceDetector.load();
+    final faces = await _faceDetector.detectImage(img.bakeOrientation(decoded));
+    if (faces.isEmpty) {
+      throw Exception(
+        'Tidak ada wajah terdeteksi pada salah satu foto embedding',
+      );
+    }
+
+    final bestFace = faces.reduce((best, item) {
+      final bestArea = best.width * best.height;
+      final itemArea = item.width * item.height;
+      return itemArea > bestArea ? item : best;
+    });
+    final faceImage = bestFace.faceImage;
+    if (faceImage == null) {
+      throw Exception('Crop wajah dari foto embedding gagal');
+    }
+
+    return _faceEmbedder.embedImage(faceImage);
   }
 
   String _initialEmbeddingStatus() {
@@ -490,6 +526,31 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
                       icon: Icons.badge_rounded,
                       keyboardType: TextInputType.number,
                       validator: _requiredValidator,
+                    ),
+                    const SizedBox(height: 14),
+                    DropdownButtonFormField<String>(
+                      value: _selectedJenisKelamin,
+                      decoration: _inputDecoration(
+                        label: 'Jenis Kelamin',
+                        icon: Icons.wc_rounded,
+                      ),
+                      items: _genderOptions
+                          .map(
+                            (item) => DropdownMenuItem<String>(
+                              value: item,
+                              child: Text(item),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        setState(() => _selectedJenisKelamin = value);
+                      },
+                      validator: (value) {
+                        if (value == null || value.isEmpty) {
+                          return 'Jenis kelamin wajib dipilih';
+                        }
+                        return null;
+                      },
                     ),
                     const SizedBox(height: 14),
                     DropdownButtonFormField<int>(
@@ -1173,6 +1234,11 @@ class _SiswaCardState extends State<_SiswaCard> {
                                 maxWidth: 118,
                               ),
                               _TinyMeta(
+                                icon: Icons.wc_rounded,
+                                label: _genderLabel(siswa.jenisKelamin),
+                                maxWidth: 112,
+                              ),
+                              _TinyMeta(
                                 icon: Icons.face_retouching_natural_rounded,
                                 label: _embeddingLabel(siswa.embeddingStatus),
                                 maxWidth: 128,
@@ -1347,6 +1413,12 @@ class _SiswaDetails extends StatelessWidget {
             ),
             const SizedBox(height: 12),
             _DetailLine(
+              icon: Icons.wc_rounded,
+              title: 'Jenis kelamin',
+              value: _genderLabel(siswa.jenisKelamin),
+            ),
+            const SizedBox(height: 12),
+            _DetailLine(
               icon: Icons.home_rounded,
               title: 'Alamat',
               value: (siswa.alamat == null || siswa.alamat!.trim().isEmpty)
@@ -1427,6 +1499,7 @@ class _SiswaItem {
     required this.nis,
     required this.kelasId,
     required this.embeddingStatus,
+    this.jenisKelamin,
     this.alamat,
     this.fotoUrl,
   });
@@ -1436,6 +1509,7 @@ class _SiswaItem {
   final String nis;
   final int kelasId;
   final String embeddingStatus;
+  final String? jenisKelamin;
   final String? alamat;
   final String? fotoUrl;
 
@@ -1445,6 +1519,7 @@ class _SiswaItem {
       nama: json['nama'] ?? '',
       nis: json['nis'] ?? '',
       kelasId: _intFromJson(json['kelas_id']) ?? 0,
+      jenisKelamin: _normalizeGender(json['jenis_kelamin']),
       alamat: json['alamat'],
       fotoUrl: json['foto_url'],
       embeddingStatus: json['embedding_status'] ?? 'belum_diproses',
@@ -1512,6 +1587,19 @@ int? _intFromJson(dynamic value) {
   if (value == null) return null;
   if (value is int) return value;
   return int.tryParse(value.toString());
+}
+
+const _genderOptions = ['Laki-laki', 'Perempuan'];
+
+String _genderLabel(String? value) {
+  if (value == null || value.trim().isEmpty) return 'Belum diisi';
+  return value;
+}
+
+String? _normalizeGender(dynamic value) {
+  if (value == null) return null;
+  final text = value.toString().trim();
+  return _genderOptions.contains(text) ? text : null;
 }
 
 String _embeddingLabel(String value) {

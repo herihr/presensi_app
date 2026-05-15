@@ -30,6 +30,11 @@ def ensure_schema_updates():
 
     if "guru" in table_names:
         guru_columns = {column["name"] for column in inspector.get_columns("guru")}
+        if "jenis_kelamin" not in guru_columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE guru ADD COLUMN jenis_kelamin VARCHAR(20) NULL")
+                )
         if "foto_url" not in guru_columns:
             with engine.begin() as connection:
                 connection.execute(
@@ -44,6 +49,10 @@ def ensure_schema_updates():
     if "siswa" in table_names:
         siswa_columns = {column["name"] for column in inspector.get_columns("siswa")}
         with engine.begin() as connection:
+            if "jenis_kelamin" not in siswa_columns:
+                connection.execute(
+                    text("ALTER TABLE siswa ADD COLUMN jenis_kelamin VARCHAR(20) NULL")
+                )
             if "alamat" not in siswa_columns:
                 connection.execute(text("ALTER TABLE siswa ADD COLUMN alamat VARCHAR(255) NULL"))
             if "foto_url" not in siswa_columns:
@@ -83,6 +92,41 @@ def ensure_schema_updates():
             "uq_presensi_siswa_jadwal_tanggal",
             ["siswa_id", "jadwal_id", "tanggal"],
         )
+
+    if "jadwal" in table_names:
+        try:
+            with engine.begin() as connection:
+                if "presensi" in table_names:
+                    connection.execute(
+                        text(
+                            "DELETE p FROM presensi p "
+                            "JOIN jadwal j ON j.id = p.jadwal_id "
+                            "WHERE j.kelas_id IS NULL "
+                            "OR j.mapel_id IS NULL "
+                            "OR j.guru_id IS NULL"
+                        )
+                    )
+                connection.execute(
+                    text(
+                        "DELETE FROM jadwal "
+                        "WHERE kelas_id IS NULL OR mapel_id IS NULL OR guru_id IS NULL"
+                    )
+                )
+        except SQLAlchemyError as exc:
+            print(f"WARNING: could not clean invalid jadwal rows: {exc}")
+
+    if "embeddings" in table_names:
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "DELETE e FROM embeddings e "
+                    "LEFT JOIN siswa s ON s.id = e.siswa_id "
+                    "WHERE e.siswa_id IS NULL OR s.id IS NULL"
+                )
+            )
+            connection.execute(
+                text("ALTER TABLE embeddings MODIFY COLUMN siswa_id INT NOT NULL")
+            )
 
 
 def _drop_single_column_unique_index(table_name: str, column_name: str):

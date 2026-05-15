@@ -63,7 +63,8 @@ class ApiService {
     }
 
     final detail = body is Map ? body['detail'] : res.reasonPhrase;
-    throw Exception(detail ?? body ?? 'Request gagal');
+    final message = detail ?? body ?? 'Request gagal';
+    throw Exception('HTTP ${res.statusCode}: $message');
   }
 
   dynamic _tryDecodeJson(String body) {

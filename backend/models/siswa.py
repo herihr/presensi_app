@@ -9,6 +9,7 @@ class Siswa(Base):
     id = Column(Integer, primary_key=True, index=True)
     nama = Column(String(100), nullable=False)
     nis = Column(String(50), unique=True, nullable=False)
+    jenis_kelamin = Column(String(20), nullable=True)
     kelas_id = Column(Integer, ForeignKey("kelas.id"), nullable=False)
     alamat = Column(String(255), nullable=True)
     foto_url = Column(String(255), nullable=True)

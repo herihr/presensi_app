@@ -13,6 +13,7 @@ class AdminKelasView extends StatefulWidget {
 class _AdminKelasViewState extends State<AdminKelasView> {
   final ApiService _api = ApiService();
   late Future<_KelasListData> _kelasFuture;
+  Set<String> _existingKelasNames = {};
 
   @override
   void initState() {
@@ -25,18 +26,22 @@ class _AdminKelasViewState extends State<AdminKelasView> {
       _api.get('/api/kelas/'),
       _api.get('/api/guru/'),
     ]);
-    return _KelasListData(
+    final data = _KelasListData(
       kelas: (responses[0] as List)
           .map((item) => _KelasItem.fromJson(item as Map<String, dynamic>))
           .toList(),
       guruById: _guruMapFromResponse(responses[1] as List),
     );
+    _existingKelasNames = data.kelas.map((item) => item.namaKelas).toSet();
+    return data;
   }
 
   Future<void> _openCreateKelasPage() async {
     final created = await Navigator.of(context).push<bool>(
       MaterialPageRoute(
-        builder: (_) => const TambahKelasPage(),
+        builder: (_) => TambahKelasPage(
+          existingKelas: _existingKelasNames,
+        ),
       ),
     );
 
@@ -179,7 +184,12 @@ class _AdminKelasViewState extends State<AdminKelasView> {
 }
 
 class TambahKelasPage extends StatefulWidget {
-  const TambahKelasPage({super.key});
+  const TambahKelasPage({
+    super.key,
+    required this.existingKelas,
+  });
+
+  final Set<String> existingKelas;
 
   @override
   State<TambahKelasPage> createState() => _TambahKelasPageState();
@@ -188,24 +198,64 @@ class TambahKelasPage extends StatefulWidget {
 class _TambahKelasPageState extends State<TambahKelasPage> {
   final _formKey = GlobalKey<FormState>();
   final _api = ApiService();
-  final _namaKelasController = TextEditingController();
 
   bool _isLoading = false;
+  String? _selectedTingkat;
+  String? _selectedRombel;
+  late Set<String> _existingKelas;
 
   @override
-  void dispose() {
-    _namaKelasController.dispose();
-    super.dispose();
+  void initState() {
+    super.initState();
+    _existingKelas = widget.existingKelas;
+    _loadExistingKelas();
+  }
+
+  Future<void> _loadExistingKelas() async {
+    try {
+      final response = await _api.get('/api/kelas/');
+      if (!mounted) return;
+      final names = (response as List)
+          .map((item) => _KelasItem.fromJson(item as Map<String, dynamic>))
+          .map((item) => item.namaKelas)
+          .toSet();
+
+      setState(() {
+        _existingKelas = names;
+        final tingkat = _selectedTingkat;
+        final rombel = _selectedRombel;
+        if (tingkat != null &&
+            rombel != null &&
+            _isKelasUnavailable('$tingkat $rombel')) {
+          _selectedRombel = null;
+        }
+      });
+    } catch (_) {
+      // Cache dari halaman sebelumnya tetap dipakai jika refresh opsi gagal.
+    }
   }
 
   Future<void> _submit() async {
     if (!_formKey.currentState!.validate()) return;
 
+    final tingkat = _selectedTingkat;
+    final rombel = _selectedRombel;
+    if (tingkat == null || rombel == null) return;
+    final namaKelas = '$tingkat $rombel';
+    if (_isKelasUnavailable(namaKelas)) {
+      await AppAlert.warning(
+        context,
+        title: 'Kelas Sudah Ada',
+        message: '$namaKelas sudah tersimpan dan tidak bisa ditambahkan lagi.',
+      );
+      return;
+    }
+
     setState(() => _isLoading = true);
 
     try {
       await _api.post('/api/kelas/', {
-        'nama_kelas': _namaKelasController.text.trim(),
+        'nama_kelas': namaKelas,
       });
 
       if (!mounted) return;
@@ -238,9 +288,10 @@ class _TambahKelasPageState extends State<TambahKelasPage> {
         elevation: 1,
       ),
       body: SafeArea(
-        child: SingleChildScrollView(
+        child: ListView(
           padding: const EdgeInsets.all(24),
-          child: Form(
+          children: [
+            Form(
             key: _formKey,
             child: Column(
               crossAxisAlignment: CrossAxisAlignment.start,
@@ -250,22 +301,69 @@ class _TambahKelasPageState extends State<TambahKelasPage> {
                 _SectionCard(
                   title: 'Informasi Kelas',
                   children: [
-                    TextFormField(
-                      controller: _namaKelasController,
-                      textCapitalization: TextCapitalization.characters,
+                    DropdownButtonFormField<String>(
+                      value: _selectedTingkat,
                       decoration: _inputDecoration(
-                        label: 'Nama Kelas',
+                        label: 'Tingkat Kelas',
                         icon: Icons.class_rounded,
                       ),
+                      items: _tingkatKelasOptions
+                          .map(
+                            (item) => DropdownMenuItem<String>(
+                              value: item,
+                              child: Text('Kelas $item'),
+                            ),
+                          )
+                          .toList(),
+                      onChanged: (value) {
+                        setState(() {
+                          _selectedTingkat = value;
+                          final selectedRombel = _selectedRombel;
+                          if (value != null &&
+                              selectedRombel != null &&
+                              _isKelasUnavailable('$value $selectedRombel')) {
+                            _selectedRombel = null;
+                          }
+                        });
+                      },
                       validator: (value) {
-                        if (value == null || value.trim().isEmpty) {
-                          return 'Nama kelas wajib diisi';
-                        }
-                        if (value.trim().length < 2) {
-                          return 'Nama kelas terlalu pendek';
+                        if (value == null) return 'Tingkat kelas wajib dipilih';
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 14),
+                    DropdownButtonFormField<String>(
+                      value: _selectedRombel,
+                      decoration: _inputDecoration(
+                        label: 'Pilihan Kelas',
+                        icon: Icons.sort_by_alpha_rounded,
+                      ),
+                      items: _rombelOptions.map(_buildRombelItem).toList(),
+                      onChanged: _selectedTingkat == null
+                          ? null
+                          : (value) {
+                              setState(() => _selectedRombel = value);
+                            },
+                      validator: (value) {
+                        if (value == null) return 'Pilihan kelas wajib dipilih';
+                        final tingkat = _selectedTingkat;
+                        if (tingkat != null &&
+                            _isKelasUnavailable('$tingkat $value')) {
+                          return 'Kelas $tingkat $value sudah ada';
                         }
                         return null;
                       },
+                    ),
+                    const SizedBox(height: 14),
+                    _KelasPreviewCard(
+                      namaKelas: _selectedTingkat == null || _selectedRombel == null
+                          ? 'Pilih tingkat dan kelas'
+                          : '${_selectedTingkat!} ${_selectedRombel!}',
+                      isUnavailable: _selectedTingkat != null &&
+                          _selectedRombel != null &&
+                          _isKelasUnavailable(
+                            '${_selectedTingkat!} ${_selectedRombel!}',
+                          ),
                     ),
                   ],
                 ),
@@ -294,9 +392,34 @@ class _TambahKelasPageState extends State<TambahKelasPage> {
               ],
             ),
           ),
+          ],
         ),
       ),
     );
+  }
+
+  DropdownMenuItem<String> _buildRombelItem(String rombel) {
+    final tingkat = _selectedTingkat;
+    final isUnavailable =
+        tingkat != null && _isKelasUnavailable('$tingkat $rombel');
+
+    return DropdownMenuItem<String>(
+      value: rombel,
+      enabled: !isUnavailable,
+      child: Text(
+        isUnavailable ? '$rombel - sudah ada' : rombel,
+        overflow: TextOverflow.ellipsis,
+        style: TextStyle(
+          color: isUnavailable ? const Color(0xFF9CA3AF) : null,
+          fontWeight: isUnavailable ? FontWeight.w600 : null,
+        ),
+      ),
+    );
+  }
+
+  bool _isKelasUnavailable(String namaKelas) {
+    final normalized = _normalizeKelasName(namaKelas);
+    return _existingKelas.map(_normalizeKelasName).contains(normalized);
   }
 }
 
@@ -343,6 +466,89 @@ class _KelasHeaderCard extends StatelessWidget {
             style: Theme.of(context).textTheme.bodySmall?.copyWith(
                   color: const Color(0xFF737686),
                 ),
+          ),
+        ],
+      ),
+    );
+  }
+}
+
+class _KelasPreviewCard extends StatelessWidget {
+  const _KelasPreviewCard({
+    required this.namaKelas,
+    this.isUnavailable = false,
+  });
+
+  final String namaKelas;
+  final bool isUnavailable;
+
+  @override
+  Widget build(BuildContext context) {
+    final isReady = !namaKelas.startsWith('Pilih') && !isUnavailable;
+    return Container(
+      width: double.infinity,
+      padding: const EdgeInsets.all(14),
+      decoration: BoxDecoration(
+        color: isUnavailable
+            ? const Color(0xFFFFF1F2)
+            : isReady
+                ? const Color(0xFFEFF6FF)
+                : const Color(0xFFF8FAFF),
+        borderRadius: BorderRadius.circular(14),
+        border: Border.all(
+          color: isUnavailable
+              ? const Color(0xFFDC2626).withOpacity(0.28)
+              : isReady
+                  ? const Color(0xFF2563EB).withOpacity(0.28)
+                  : const Color(0xFFC3C6D7).withOpacity(0.45),
+        ),
+      ),
+      child: Row(
+        children: [
+          Container(
+            width: 40,
+            height: 40,
+            decoration: BoxDecoration(
+              color: isReady ? Colors.white : const Color(0xFFEFF3FF),
+              shape: BoxShape.circle,
+            ),
+            child: Icon(
+              isUnavailable ? Icons.block_rounded : Icons.badge_rounded,
+              color: isUnavailable
+                  ? const Color(0xFFDC2626)
+                  : isReady
+                      ? const Color(0xFF2563EB)
+                      : const Color(0xFF737686),
+            ),
+          ),
+          const SizedBox(width: 12),
+          Expanded(
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  'Nama kelas otomatis',
+                  style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                        color: const Color(0xFF737686),
+                        fontWeight: FontWeight.w700,
+                      ),
+                ),
+                const SizedBox(height: 3),
+                Text(
+                  isUnavailable ? '$namaKelas sudah ada' : namaKelas,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: isUnavailable
+                            ? const Color(0xFFB91C1C)
+                            : isReady
+                                ? const Color(0xFF1D4ED8)
+                                : const Color(0xFF737686),
+                        fontWeight: FontWeight.w900,
+                      ),
+                ),
+              ],
+            ),
           ),
         ],
       ),
@@ -782,6 +988,27 @@ int? _gradeFromClassName(String name) {
   if (normalized.startsWith('9')) return 9;
   return null;
 }
+
+String _normalizeKelasName(String value) {
+  return value.trim().toUpperCase().replaceAll(RegExp(r'\s+'), ' ');
+}
+
+const _tingkatKelasOptions = ['VII', 'VIII', 'IX'];
+
+const _rombelOptions = [
+  'A',
+  'B',
+  'C',
+  'D',
+  'E',
+  'F',
+  'G',
+  'H',
+  'I',
+  'J',
+  'K',
+  'L',
+];
 
 Map<int, String> _guruMapFromResponse(List response) {
   final labels = <int, String>{};

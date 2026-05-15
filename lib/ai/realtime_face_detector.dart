@@ -13,9 +13,11 @@ import 'face_embedder.dart';
 
 class RealtimeFaceDetector {
   static const _modelPath = 'lib/assets/yolofacedetect.tflite';
-  static const _confidenceThreshold = 0.35;
-  static const _iouThreshold = 0.40;
+  static const _confidenceThreshold = 0.5;
+  static const _iouThreshold = 0.5;
   static const _faceCropPaddingRatio = 0.25;
+  static const _inputWidth = 640;
+  static const _inputHeight = 640;
 
   RealtimeFaceDetector({Uint8List? modelBytes}) : _modelBytes = modelBytes;
 
@@ -104,14 +106,12 @@ Future<List<DetectedFaceBox>> _detectFacesFromRgb({
     throw StateError('Shape input model deteksi tidak didukung: $inputShape');
   }
 
-  final inputHeight = inputShape[1];
-  final inputWidth = inputShape[2];
   final isFloatInput =
       inputTensor.type.toString().toLowerCase().contains('float');
   final resized = img.copyResize(
     rgbImage,
-    width: inputWidth,
-    height: inputHeight,
+    width: RealtimeFaceDetector._inputWidth,
+    height: RealtimeFaceDetector._inputHeight,
     interpolation: img.Interpolation.linear,
   );
   final input = _buildInput(resized, isFloatInput);
@@ -124,11 +124,11 @@ Future<List<DetectedFaceBox>> _detectFacesFromRgb({
   for (final row in rows) {
     final box = _decodeBox(
       row,
-      imageWidth: imageWidth,
-      imageHeight: imageHeight,
-      inputWidth: inputWidth.toDouble(),
-      inputHeight: inputHeight.toDouble(),
-    );
+        imageWidth: imageWidth,
+        imageHeight: imageHeight,
+        inputWidth: RealtimeFaceDetector._inputWidth.toDouble(),
+        inputHeight: RealtimeFaceDetector._inputHeight.toDouble(),
+      );
     if (box != null) detections.add(box);
   }
 

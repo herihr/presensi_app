@@ -7,7 +7,7 @@ class Constants {
   static const BackendSource backendSource = BackendSource.localIp;
 
   static const String localBackendScheme = "http";
-  static const String localBackendHost = "192.168.1.8";
+  static const String localBackendHost = "192.168.1.10";
   static const int localBackendPort = 8000;
 
   static const String cloudflaredBaseUrl =

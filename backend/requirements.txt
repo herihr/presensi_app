@@ -1,0 +1,6 @@
+uvicorn fastapi
+sqlalchemy
+pymysql
+bcrypt
+python-jose[cryptography]
+pydantic[email]

@@ -181,7 +181,9 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
 
   Future<List<AiKnownFace>> _loadKnownFaces() async {
     try {
-      final siswaResponse = await _api.get('/api/siswa/kelas/${widget.kelasId}');
+      final siswaResponse = await _api.get(
+        '/api/siswa/kelas/${widget.kelasId}',
+      );
       final siswaById = <int, String>{};
       for (final item in siswaResponse as List) {
         final siswa = item as Map<String, dynamic>;
@@ -204,11 +206,7 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
         final embedding = _embeddingFromJson(embeddingJson['embedding']);
         if (siswaId != null && name != null && embedding.isNotEmpty) {
           knownFaces.add(
-            AiKnownFace(
-              siswaId: siswaId,
-              name: name,
-              embedding: embedding,
-            ),
+            AiKnownFace(siswaId: siswaId, name: name, embedding: embedding),
           );
         }
       }
@@ -257,7 +255,8 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
         .where((face) => face.isRecognized && face.siswaId != null)
         .map((face) => face.siswaId!)
         .where(
-          (id) => widget.targetStudentId == null || id == widget.targetStudentId,
+          (id) =>
+              widget.targetStudentId == null || id == widget.targetStudentId,
         )
         .where((id) => !_reportedStudentIds.contains(id))
         .toSet();
@@ -435,10 +434,7 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
 }
 
 class _ScannerOverlayPainter extends CustomPainter {
-  const _ScannerOverlayPainter({
-    required this.faces,
-    required this.frameSize,
-  });
+  const _ScannerOverlayPainter({required this.faces, required this.frameSize});
 
   final List<AiRecognizedFaceBox> faces;
   final Size? frameSize;
@@ -469,8 +465,9 @@ class _ScannerOverlayPainter extends CustomPainter {
 
     for (final face in faces) {
       final faceRect = _scaleFaceRect(face, size);
-      final accentColor =
-          face.isRecognized ? const Color(0xFF10B981) : const Color(0xFFEF4444);
+      final accentColor = face.isRecognized
+          ? const Color(0xFF10B981)
+          : const Color(0xFFEF4444);
       final facePaint = Paint()
         ..color = accentColor
         ..strokeWidth = 4

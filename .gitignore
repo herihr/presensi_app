@@ -32,7 +32,7 @@ migrate_working_dir/
 .pub/
 /build/
 /coverage/
-
+backend/venv/
 # Symbolication related
 app.*.symbols
 
@@ -43,3 +43,12 @@ app.*.map.json
 /android/app/debug
 /android/app/profile
 /android/app/release
+
+venv/
+__pycache__/
+*.pyc
+.env
+statics/
+backend/venv/
+__pycache__/
+*.pyc

@@ -5,6 +5,7 @@ import 'package:flutter/material.dart';
 import '../controllers/auth_controller.dart';
 import '../utils/app_alert.dart';
 import 'admin/admin_page.dart';
+import 'forgot_password_page.dart';
 import 'guru/guru_page.dart';
 
 class LoginPage extends StatefulWidget {
@@ -151,6 +152,17 @@ class _LoginPageState extends State<LoginPage> {
       _selectedRole = role;
       _emailController.text = role == 'admin' ? 'admin@gmail.com' : 'guru@gmail.com';
     });
+  }
+
+  Future<void> _openForgotPassword() async {
+    await Navigator.of(context).push(
+      MaterialPageRoute(
+        builder: (_) => ForgotPasswordPage(
+          initialEmail: _emailController.text.trim(),
+          initialRole: _selectedRole,
+        ),
+      ),
+    );
   }
 
   @override
@@ -393,9 +405,7 @@ class _LoginPageState extends State<LoginPage> {
                                             ),
                                       ),
                                       GestureDetector(
-                                        onTap: () {
-                                          // Handle forgot password
-                                        },
+                                        onTap: _openForgotPassword,
                                         child: Text(
                                           'LUPA?',
                                           style: Theme.of(context).textTheme.labelSmall?.copyWith(

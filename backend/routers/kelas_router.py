@@ -68,7 +68,14 @@ def delete_kelas(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_admin),
 ):
-    success = KelasService.delete_kelas(db, kelas_id)
+    try:
+        success = KelasService.delete_kelas(db, kelas_id)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail="Kelas tidak bisa dihapus karena masih dipakai oleh data lain",
+        )
     if not success:
         raise HTTPException(status_code=404, detail="Kelas tidak ditemukan")
     return {"message": "Kelas berhasil dihapus"}

@@ -1,0 +1,4 @@
+-- Foto profil admin, guru, dan siswa disimpan sebagai file di backend/uploads.
+-- Kolom foto_url menyimpan path server seperti /uploads/guru/guru_xxx.jpg.
+-- Tidak ada perubahan kolom wajib karena kolom foto_url sudah ada.
+-- Kolom yang masih LONGTEXT tetap aman untuk menyimpan path server dan data lama.

@@ -5,7 +5,7 @@ import 'package:flutter/material.dart';
 import 'package:flutter/services.dart';
 import 'package:image_picker/image_picker.dart';
 
-import '../../models/user_model.dart';
+import '../../models/auth/user_model.dart';
 import '../../services/api_service.dart';
 import '../../utils/app_alert.dart';
 
@@ -78,10 +78,8 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
       );
 
       if (image == null || !mounted) return;
-      final photoData = await _encodePhotoForDatabase(image.path);
-      if (!mounted) return;
       setState(() {
-        _fotoUrl = photoData;
+        _fotoUrl = image.path;
       });
     } on MissingPluginException {
       _showMessage(
@@ -101,17 +99,18 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
 
     setState(() => _isLoading = true);
 
-    final payload = <String, dynamic>{
-      'nama': _namaController.text.trim(),
-      'email': _emailController.text.trim(),
-      'foto_url': _fotoUrl,
-    };
-
-    if (_passwordController.text.trim().isNotEmpty) {
-      payload['password'] = _passwordController.text.trim();
-    }
-
     try {
+      final fotoUrl = await _api.uploadPhotoIfLocal(_fotoUrl, 'admin');
+      final payload = <String, dynamic>{
+        'nama': _namaController.text.trim(),
+        'email': _emailController.text.trim(),
+        'foto_url': fotoUrl,
+      };
+
+      if (_passwordController.text.trim().isNotEmpty) {
+        payload['password'] = _passwordController.text.trim();
+      }
+
       final response = await _api.put('/api/admin/${widget.user.id}', payload);
       if (!mounted) return;
 
@@ -156,26 +155,11 @@ class _AdminProfilePageState extends State<AdminProfilePage> {
     if (path.startsWith('http://') || path.startsWith('https://')) {
       return NetworkImage(path);
     }
+    if (path.startsWith('/uploads/')) {
+      return NetworkImage(ApiService.resolveMediaUrl(path));
+    }
     if (!File(path).existsSync()) return null;
     return FileImage(File(path));
-  }
-
-  Future<String> _encodePhotoForDatabase(String sourcePath) async {
-    final bytes = await File(sourcePath).readAsBytes();
-    final mimeType = _mimeTypeFromPath(sourcePath);
-    return 'data:$mimeType;base64,${base64Encode(bytes)}';
-  }
-
-  String _mimeTypeFromPath(String path) {
-    final fileName = path.split(Platform.pathSeparator).last;
-    final lowerName = fileName.toLowerCase();
-    if (lowerName.endsWith('.png')) {
-      return 'image/png';
-    }
-    if (lowerName.endsWith('.webp')) {
-      return 'image/webp';
-    }
-    return 'image/jpeg';
   }
 
   @override

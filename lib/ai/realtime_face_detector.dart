@@ -14,7 +14,7 @@ import 'face_embedder.dart';
 class RealtimeFaceDetector {
   static const _modelPath = 'lib/assets/yolofacedetect.tflite';
   static const _confidenceThreshold = 0.35;
-  static const _iouThreshold = 0.40;
+  static const _iouThreshold = 0.50;
   static const _faceCropPaddingRatio = 0.25;
 
   RealtimeFaceDetector({Uint8List? modelBytes}) : _modelBytes = modelBytes;

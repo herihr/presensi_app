@@ -19,4 +19,15 @@ class Constants {
   static const String baseUrl = backendSource == BackendSource.localIp
       ? localBaseUrl
       : cloudflaredBaseUrl;
+
+  static String mediaUrl(String? path) {
+    if (path == null || path.isEmpty) return '';
+    if (path.startsWith('http://') ||
+        path.startsWith('https://') ||
+        path.startsWith('data:image/')) {
+      return path;
+    }
+    if (path.startsWith('/')) return '$baseUrl$path';
+    return path;
+  }
 }

@@ -345,13 +345,14 @@ class _TambahGuruPageState extends State<TambahGuruPage> {
 
     try {
       final mapelIds = _selectedMapelIds.toList()..sort();
+      final fotoUrl = await _api.uploadPhotoIfLocal(_selectedFotoPath, 'guru');
 
       final payload = {
         'nama': _namaController.text.trim(),
         'nip': _nipController.text.trim(),
         'jenis_kelamin': _selectedJenisKelamin,
         'email': _emailController.text.trim(),
-        'foto_url': _selectedFotoPath,
+        'foto_url': fotoUrl,
         'mapel_ids': mapelIds,
         'kelas_asuh_id': _selectedKelasId,
       };
@@ -532,34 +533,12 @@ class _TambahGuruPageState extends State<TambahGuruPage> {
                       },
                     ),
                     const SizedBox(height: 14),
-                    DropdownButtonFormField<int?>(
-                      value: kelasDropdownValue,
-                      decoration: _inputDecoration(
-                        label: 'Wali Kelas',
-                        icon: Icons.class_rounded,
-                      ),
-                      items: [
-                        const DropdownMenuItem<int?>(
-                          value: null,
-                          child: Text('Tidak menjadi wali kelas'),
-                        ),
-                        ...availableKelasOptions.map(
-                          (item) => DropdownMenuItem<int?>(
-                            value: item.id,
-                            child: Text(item.label),
-                          ),
-                        ),
-                      ],
+                    _WaliKelasSelector(
+                      options: availableKelasOptions,
+                      selectedId: kelasDropdownValue,
                       onChanged: (value) {
                         setState(() => _selectedKelasId = value);
                       },
-                    ),
-                    const SizedBox(height: 8),
-                    Text(
-                      'Pilih maksimal satu kelas. Kelas yang sudah punya wali tidak ditampilkan.',
-                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: const Color(0xFF737686),
-                          ),
                     ),
                   ],
                 ),
@@ -889,6 +868,466 @@ class _MultiOptionSelector extends StatelessWidget {
   }
 }
 
+class _WaliKelasSelector extends StatelessWidget {
+  const _WaliKelasSelector({
+    required this.options,
+    required this.selectedId,
+    required this.onChanged,
+  });
+
+  final List<_OptionItem> options;
+  final int? selectedId;
+  final ValueChanged<int?> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    final selected = _optionById(options, selectedId);
+
+    return InkWell(
+      onTap: () => _showPicker(context),
+      borderRadius: BorderRadius.circular(14),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(14),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFF),
+          border: Border.all(color: const Color(0xFFC3C6D7).withOpacity(0.45)),
+          borderRadius: BorderRadius.circular(14),
+        ),
+        child: Row(
+          children: [
+            Container(
+              width: 42,
+              height: 42,
+              decoration: BoxDecoration(
+                color: const Color(0xFFEFF6FF),
+                borderRadius: BorderRadius.circular(12),
+              ),
+              child: const Icon(
+                Icons.class_rounded,
+                color: Color(0xFF2563EB),
+              ),
+            ),
+            const SizedBox(width: 12),
+            Expanded(
+              child: Column(
+                crossAxisAlignment: CrossAxisAlignment.start,
+                children: [
+                  Text(
+                    'Wali Kelas',
+                    style: Theme.of(context).textTheme.labelMedium?.copyWith(
+                          color: const Color(0xFF737686),
+                          fontWeight: FontWeight.w700,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    selected?.label ?? 'Tidak menjadi wali kelas',
+                    maxLines: 1,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                          color: const Color(0xFF191B23),
+                          fontWeight: FontWeight.w800,
+                        ),
+                  ),
+                  const SizedBox(height: 4),
+                  Text(
+                    'Kelas yang sudah punya wali tidak ditampilkan.',
+                    maxLines: 2,
+                    overflow: TextOverflow.ellipsis,
+                    style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                          color: const Color(0xFF737686),
+                        ),
+                  ),
+                ],
+              ),
+            ),
+            const SizedBox(width: 8),
+            Icon(
+              Icons.keyboard_arrow_down_rounded,
+              color: Colors.grey.shade600,
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  Future<void> _showPicker(BuildContext context) async {
+    final result = await showModalBottomSheet<_WaliKelasPickerResult>(
+      context: context,
+      isScrollControlled: true,
+      backgroundColor: Colors.transparent,
+      builder: (_) => _WaliKelasPickerSheet(
+        options: options,
+        selectedId: selectedId,
+      ),
+    );
+
+    if (result != null && result.value != selectedId) {
+      onChanged(result.value);
+    }
+  }
+}
+
+class _WaliKelasPickerResult {
+  const _WaliKelasPickerResult(this.value);
+
+  final int? value;
+}
+
+class _WaliKelasPickerSheet extends StatefulWidget {
+  const _WaliKelasPickerSheet({
+    required this.options,
+    required this.selectedId,
+  });
+
+  final List<_OptionItem> options;
+  final int? selectedId;
+
+  @override
+  State<_WaliKelasPickerSheet> createState() => _WaliKelasPickerSheetState();
+}
+
+class _WaliKelasPickerSheetState extends State<_WaliKelasPickerSheet> {
+  int _selectedGrade = 7;
+
+  @override
+  void initState() {
+    super.initState();
+    final selected = _optionById(widget.options, widget.selectedId);
+    _selectedGrade = _gradeFromClassName(selected?.label ?? '') ?? 7;
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    final gradeGroups = <int, List<_OptionItem>>{
+      7: _optionsByGrade(7),
+      8: _optionsByGrade(8),
+      9: _optionsByGrade(9),
+    };
+    final selectedOptions =
+        gradeGroups[_selectedGrade] ?? const <_OptionItem>[];
+
+    return SafeArea(
+      child: Container(
+        margin: const EdgeInsets.all(14),
+        constraints: BoxConstraints(
+          maxHeight: MediaQuery.of(context).size.height * 0.82,
+        ),
+        decoration: BoxDecoration(
+          color: Colors.white,
+          borderRadius: BorderRadius.circular(24),
+          boxShadow: const [
+            BoxShadow(
+              color: Color(0x260B3558),
+              blurRadius: 28,
+              offset: Offset(0, 12),
+            ),
+          ],
+        ),
+        child: Column(
+          mainAxisSize: MainAxisSize.min,
+          children: [
+            Padding(
+              padding: const EdgeInsets.fromLTRB(18, 16, 18, 12),
+              child: Row(
+                children: [
+                  Container(
+                    width: 42,
+                    height: 42,
+                    decoration: BoxDecoration(
+                      color: const Color(0xFFEFF6FF),
+                      borderRadius: BorderRadius.circular(13),
+                    ),
+                    child: const Icon(
+                      Icons.school_rounded,
+                      color: Color(0xFF2563EB),
+                    ),
+                  ),
+                  const SizedBox(width: 12),
+                  Expanded(
+                    child: Column(
+                      crossAxisAlignment: CrossAxisAlignment.start,
+                      children: [
+                        Text(
+                          'Pilih Wali Kelas',
+                          style:
+                              Theme.of(context).textTheme.titleMedium?.copyWith(
+                                    color: const Color(0xFF191B23),
+                                    fontWeight: FontWeight.w800,
+                                  ),
+                        ),
+                        const SizedBox(height: 3),
+                        Text(
+                          'Pilih satu kelas atau kosongkan penugasan',
+                          style:
+                              Theme.of(context).textTheme.bodySmall?.copyWith(
+                                    color: const Color(0xFF737686),
+                                  ),
+                        ),
+                      ],
+                    ),
+                  ),
+                  IconButton(
+                    onPressed: () => Navigator.of(context).pop(),
+                    icon: const Icon(Icons.close_rounded),
+                  ),
+                ],
+              ),
+            ),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: _WaliGradeTabs(
+                selectedGrade: _selectedGrade,
+                counts: {
+                  for (final entry in gradeGroups.entries)
+                    entry.key: entry.value.length,
+                },
+                onChanged: (grade) {
+                  setState(() => _selectedGrade = grade);
+                },
+              ),
+            ),
+            const SizedBox(height: 10),
+            Padding(
+              padding: const EdgeInsets.symmetric(horizontal: 18),
+              child: _WaliKelasOptionTile(
+                label: 'Tidak menjadi wali kelas',
+                subtitle: 'Kosongkan penugasan wali kelas',
+                selected: widget.selectedId == null,
+                accentColor: const Color(0xFF64748B),
+                onTap: () => Navigator.of(context).pop(
+                  const _WaliKelasPickerResult(null),
+                ),
+              ),
+            ),
+            const SizedBox(height: 8),
+            Flexible(
+              child: selectedOptions.isEmpty
+                  ? _EmptyWaliKelasOptions(grade: _selectedGrade)
+                  : ListView.separated(
+                      shrinkWrap: true,
+                      padding: const EdgeInsets.fromLTRB(18, 0, 18, 18),
+                      itemCount: selectedOptions.length,
+                      separatorBuilder: (_, __) => const SizedBox(height: 8),
+                      itemBuilder: (context, index) {
+                        final item = selectedOptions[index];
+                        return _WaliKelasOptionTile(
+                          label: item.label,
+                          subtitle: 'Tersedia untuk wali kelas',
+                          selected: item.id == widget.selectedId,
+                          accentColor: const Color(0xFF2563EB),
+                          onTap: () => Navigator.of(context).pop(
+                            _WaliKelasPickerResult(item.id),
+                          ),
+                        );
+                      },
+                    ),
+            ),
+          ],
+        ),
+      ),
+    );
+  }
+
+  List<_OptionItem> _optionsByGrade(int grade) {
+    final items = widget.options
+        .where((item) => _gradeFromClassName(item.label) == grade)
+        .toList()
+      ..sort(
+        (a, b) => _classSortKey(a.label).compareTo(_classSortKey(b.label)),
+      );
+    return items;
+  }
+}
+
+class _WaliGradeTabs extends StatelessWidget {
+  const _WaliGradeTabs({
+    required this.selectedGrade,
+    required this.counts,
+    required this.onChanged,
+  });
+
+  final int selectedGrade;
+  final Map<int, int> counts;
+  final ValueChanged<int> onChanged;
+
+  @override
+  Widget build(BuildContext context) {
+    return Container(
+      padding: const EdgeInsets.all(5),
+      decoration: BoxDecoration(
+        color: const Color(0xFFEFF3FF),
+        borderRadius: BorderRadius.circular(16),
+      ),
+      child: Row(
+        children: [7, 8, 9].map((grade) {
+          final selected = grade == selectedGrade;
+          return Expanded(
+            child: InkWell(
+              onTap: () => onChanged(grade),
+              borderRadius: BorderRadius.circular(12),
+              child: AnimatedContainer(
+                duration: const Duration(milliseconds: 180),
+                padding: const EdgeInsets.symmetric(vertical: 10),
+                decoration: BoxDecoration(
+                  color: selected ? Colors.white : Colors.transparent,
+                  borderRadius: BorderRadius.circular(12),
+                  boxShadow: selected
+                      ? [
+                          BoxShadow(
+                            color: const Color(0xFF2563EB).withOpacity(0.10),
+                            blurRadius: 10,
+                            offset: const Offset(0, 4),
+                          ),
+                        ]
+                      : null,
+                ),
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: [
+                    Text(
+                      'Kelas $grade',
+                      style: Theme.of(context).textTheme.labelLarge?.copyWith(
+                            color: selected
+                                ? const Color(0xFF2563EB)
+                                : const Color(0xFF737686),
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    const SizedBox(height: 2),
+                    Text(
+                      '${counts[grade] ?? 0} tersedia',
+                      style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                            color: const Color(0xFF737686),
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ),
+          );
+        }).toList(),
+      ),
+    );
+  }
+}
+
+class _WaliKelasOptionTile extends StatelessWidget {
+  const _WaliKelasOptionTile({
+    required this.label,
+    required this.subtitle,
+    required this.selected,
+    required this.accentColor,
+    required this.onTap,
+  });
+
+  final String label;
+  final String subtitle;
+  final bool selected;
+  final Color accentColor;
+  final VoidCallback onTap;
+
+  @override
+  Widget build(BuildContext context) {
+    return Material(
+      color: selected ? accentColor.withOpacity(0.10) : const Color(0xFFF8FAFF),
+      borderRadius: BorderRadius.circular(14),
+      child: InkWell(
+        onTap: onTap,
+        borderRadius: BorderRadius.circular(14),
+        child: Container(
+          padding: const EdgeInsets.all(13),
+          decoration: BoxDecoration(
+            borderRadius: BorderRadius.circular(14),
+            border: Border.all(
+              color: selected
+                  ? accentColor.withOpacity(0.55)
+                  : const Color(0xFFE2E8F0),
+            ),
+          ),
+          child: Row(
+            children: [
+              Container(
+                width: 36,
+                height: 36,
+                decoration: BoxDecoration(
+                  color: selected ? accentColor : Colors.white,
+                  borderRadius: BorderRadius.circular(11),
+                  border: Border.all(color: const Color(0xFFE2E8F0)),
+                ),
+                child: Icon(
+                  selected ? Icons.check_rounded : Icons.class_rounded,
+                  color: selected ? Colors.white : accentColor,
+                  size: 20,
+                ),
+              ),
+              const SizedBox(width: 12),
+              Expanded(
+                child: Column(
+                  crossAxisAlignment: CrossAxisAlignment.start,
+                  children: [
+                    Text(
+                      label,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodyMedium?.copyWith(
+                            color: const Color(0xFF191B23),
+                            fontWeight: FontWeight.w800,
+                          ),
+                    ),
+                    const SizedBox(height: 3),
+                    Text(
+                      subtitle,
+                      maxLines: 1,
+                      overflow: TextOverflow.ellipsis,
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF737686),
+                          ),
+                    ),
+                  ],
+                ),
+              ),
+            ],
+          ),
+        ),
+      ),
+    );
+  }
+}
+
+class _EmptyWaliKelasOptions extends StatelessWidget {
+  const _EmptyWaliKelasOptions({required this.grade});
+
+  final int grade;
+
+  @override
+  Widget build(BuildContext context) {
+    return Padding(
+      padding: const EdgeInsets.fromLTRB(18, 4, 18, 18),
+      child: Container(
+        width: double.infinity,
+        padding: const EdgeInsets.all(16),
+        decoration: BoxDecoration(
+          color: const Color(0xFFF8FAFF),
+          borderRadius: BorderRadius.circular(14),
+          border: Border.all(color: const Color(0xFFE2E8F0)),
+        ),
+        child: Text(
+          'Tidak ada ${_gradeLabel(grade)} yang tersedia. Semua kelas pada '
+          'tingkat ini sudah memiliki wali kelas.',
+          textAlign: TextAlign.center,
+          style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                color: const Color(0xFF737686),
+                fontWeight: FontWeight.w600,
+              ),
+        ),
+      ),
+    );
+  }
+}
+
 InputDecoration _inputDecoration({
   required String label,
   required IconData icon,
@@ -925,6 +1364,10 @@ ImageProvider? _photoProvider(String? path) {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return NetworkImage(path);
   }
+  if (path.startsWith('/uploads/')) {
+    return NetworkImage(ApiService.resolveMediaUrl(path));
+  }
+  if (!File(path).existsSync()) return null;
   return FileImage(File(path));
 }
 
@@ -1479,6 +1922,41 @@ Map<int, String> _labelMapFromResponse(List response, String labelKey) {
     }
   }
   return labels;
+}
+
+_OptionItem? _optionById(List<_OptionItem> options, int? id) {
+  if (id == null) return null;
+  for (final item in options) {
+    if (item.id == id) return item;
+  }
+  return null;
+}
+
+int? _gradeFromClassName(String name) {
+  final normalized = name.trim().toUpperCase();
+  if (RegExp(r'(^|\s)(VII|7)(\s|$)').hasMatch(normalized)) return 7;
+  if (RegExp(r'(^|\s)(VIII|8)(\s|$)').hasMatch(normalized)) return 8;
+  if (RegExp(r'(^|\s)(IX|9)(\s|$)').hasMatch(normalized)) return 9;
+  if (normalized.startsWith('VII')) return 7;
+  if (normalized.startsWith('VIII')) return 8;
+  if (normalized.startsWith('IX')) return 9;
+  if (normalized.startsWith('7')) return 7;
+  if (normalized.startsWith('8')) return 8;
+  if (normalized.startsWith('9')) return 9;
+  return null;
+}
+
+String _classSortKey(String name) {
+  final upper = name.trim().toUpperCase();
+  final grade = _gradeFromClassName(upper) ?? 99;
+  final rombel = RegExp(r'([A-Z])$').firstMatch(upper)?.group(1) ?? '';
+  return '$grade-$rombel-$upper';
+}
+
+String _gradeLabel(int grade) {
+  if (grade == 8) return 'Kelas 8';
+  if (grade == 9) return 'Kelas 9';
+  return 'Kelas 7';
 }
 
 class _OptionItem {

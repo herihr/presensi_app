@@ -72,7 +72,17 @@ def delete_mata_pelajaran(
     db: Session = Depends(get_db),
     current_user: dict = Depends(require_admin),
 ):
-    success = MataPelajaranService.delete_mata_pelajaran(db, mapel_id)
+    try:
+        success = MataPelajaranService.delete_mata_pelajaran(db, mapel_id)
+    except IntegrityError:
+        db.rollback()
+        raise HTTPException(
+            status_code=400,
+            detail=(
+                "Mata pelajaran tidak bisa dihapus karena masih dipakai "
+                "oleh jadwal atau data lain"
+            ),
+        )
     if not success:
         raise HTTPException(status_code=404, detail="Mata pelajaran tidak ditemukan")
     return {"message": "Mata pelajaran berhasil dihapus"}

@@ -2,7 +2,7 @@ import 'dart:convert';
 import 'dart:io';
 
 import 'package:flutter/material.dart';
-import '../../models/user_model.dart';
+import '../../models/auth/user_model.dart';
 import '../../services/api_service.dart';
 import '../../utils/app_alert.dart';
 import '../login_page.dart';
@@ -83,6 +83,9 @@ class _AdminPageState extends State<AdminPage> {
     }
     if (path.startsWith('http://') || path.startsWith('https://')) {
       return NetworkImage(path);
+    }
+    if (path.startsWith('/uploads/')) {
+      return NetworkImage(ApiService.resolveMediaUrl(path));
     }
     if (!File(path).existsSync()) return null;
     return FileImage(File(path));

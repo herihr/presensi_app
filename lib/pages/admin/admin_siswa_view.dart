@@ -372,6 +372,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
     setState(() => _isLoading = true);
 
     try {
+      final fotoUrl = await _api.uploadPhotoIfLocal(_selectedFotoPath, 'siswa');
       final payload = <String, dynamic>{
         'nama': _namaController.text.trim(),
         'nis': _nisController.text.trim(),
@@ -380,7 +381,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
         'alamat': _alamatController.text.trim().isEmpty
             ? null
             : _alamatController.text.trim(),
-        'foto_url': _selectedFotoPath,
+        'foto_url': fotoUrl,
         'embedding_status': _initialEmbeddingStatus(),
       };
 
@@ -1064,6 +1065,10 @@ ImageProvider? _photoProvider(String? path) {
   if (path.startsWith('http://') || path.startsWith('https://')) {
     return NetworkImage(path);
   }
+  if (path.startsWith('/uploads/')) {
+    return NetworkImage(ApiService.resolveMediaUrl(path));
+  }
+  if (!File(path).existsSync()) return null;
   return FileImage(File(path));
 }
 

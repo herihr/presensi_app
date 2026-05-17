@@ -5,6 +5,18 @@ class LoginRequest(BaseModel):
     password: str
 
 
+class ForgotPasswordRequest(BaseModel):
+    email: EmailStr
+    role: str | None = None
+
+
+class ResetPasswordRequest(BaseModel):
+    email: EmailStr
+    role: str | None = None
+    code: str
+    new_password: str
+
+
 class UserResponse(BaseModel):
     id: int
     nama: str

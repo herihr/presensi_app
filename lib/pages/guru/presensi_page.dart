@@ -628,6 +628,9 @@ class _StudentCard extends StatelessWidget {
     if (path.startsWith('http://') || path.startsWith('https://')) {
       return NetworkImage(path);
     }
+    if (path.startsWith('/uploads/')) {
+      return NetworkImage(ApiService.resolveMediaUrl(path));
+    }
     if (!File(path).existsSync()) return null;
     return FileImage(File(path));
   }

@@ -52,6 +52,55 @@ class _AdminKelasViewState extends State<AdminKelasView> {
     }
   }
 
+  Future<void> _openEditKelasPage(_KelasItem kelas) async {
+    final updated = await Navigator.of(context).push<bool>(
+      MaterialPageRoute(
+        builder: (_) => _EditKelasPage(
+          kelas: kelas,
+          existingKelas: _existingKelasNames,
+        ),
+      ),
+    );
+
+    if (updated == true && mounted) {
+      setState(() {
+        _kelasFuture = _loadKelas();
+      });
+    }
+  }
+
+  Future<void> _deleteKelas(_KelasItem kelas) async {
+    final confirmed = await AppAlert.confirm(
+      context: context,
+      title: 'Hapus Kelas?',
+      message:
+          'Kelas ${kelas.namaKelas} akan dihapus. Pastikan kelas ini tidak sedang dipakai oleh siswa atau jadwal.',
+      confirmText: 'Hapus',
+    );
+    if (!confirmed) return;
+
+    try {
+      await _api.delete('/api/kelas/${kelas.id}');
+      if (!mounted) return;
+      await AppAlert.success(
+        context,
+        title: 'Berhasil',
+        message: 'Kelas ${kelas.namaKelas} berhasil dihapus.',
+      );
+      if (!mounted) return;
+      setState(() {
+        _kelasFuture = _loadKelas();
+      });
+    } catch (error) {
+      if (!mounted) return;
+      await AppAlert.error(
+        context,
+        title: 'Gagal',
+        message: error.toString().replaceFirst('Exception: ', ''),
+      );
+    }
+  }
+
   Future<void> _refresh() async {
     setState(() {
       _kelasFuture = _loadKelas();
@@ -144,7 +193,11 @@ class _AdminKelasViewState extends State<AdminKelasView> {
                     );
                   }
 
-                  return _KelasGroupedTabs(data: data);
+                  return _KelasGroupedTabs(
+                    data: data,
+                    onEdit: _openEditKelasPage,
+                    onDelete: _deleteKelas,
+                  );
                 },
               ),
               const SizedBox(height: 80),
@@ -422,6 +475,155 @@ class _TambahKelasPageState extends State<TambahKelasPage> {
   bool _isKelasUnavailable(String namaKelas) {
     final normalized = _normalizeKelasName(namaKelas);
     return _existingKelas.map(_normalizeKelasName).contains(normalized);
+  }
+}
+
+class _EditKelasPage extends StatefulWidget {
+  const _EditKelasPage({
+    super.key,
+    required this.kelas,
+    required this.existingKelas,
+  });
+
+  final _KelasItem kelas;
+  final Set<String> existingKelas;
+
+  @override
+  State<_EditKelasPage> createState() => _EditKelasPageState();
+}
+
+class _EditKelasPageState extends State<_EditKelasPage> {
+  final _formKey = GlobalKey<FormState>();
+  final _api = ApiService();
+  late final TextEditingController _namaKelasController;
+
+  bool _isLoading = false;
+
+  @override
+  void initState() {
+    super.initState();
+    _namaKelasController =
+        TextEditingController(text: widget.kelas.namaKelas);
+  }
+
+  @override
+  void dispose() {
+    _namaKelasController.dispose();
+    super.dispose();
+  }
+
+  Future<void> _submit() async {
+    if (!_formKey.currentState!.validate()) return;
+
+    setState(() => _isLoading = true);
+
+    try {
+      await _api.put('/api/kelas/${widget.kelas.id}', {
+        'nama_kelas': _namaKelasController.text.trim(),
+      });
+
+      if (!mounted) return;
+      await AppAlert.success(
+        context,
+        title: 'Berhasil',
+        message: 'Data kelas berhasil diperbarui.',
+      );
+      Navigator.of(context).pop(true);
+    } catch (error) {
+      if (!mounted) return;
+      await AppAlert.error(
+        context,
+        title: 'Gagal',
+        message: error.toString().replaceFirst('Exception: ', ''),
+      );
+    } finally {
+      if (mounted) setState(() => _isLoading = false);
+    }
+  }
+
+  @override
+  Widget build(BuildContext context) {
+    return Scaffold(
+      backgroundColor: const Color(0xFFFAF8FF),
+      appBar: AppBar(
+        title: const Text('Edit Kelas'),
+        backgroundColor: Colors.white,
+        foregroundColor: const Color(0xFF191B23),
+        elevation: 1,
+      ),
+      body: SafeArea(
+        child: SingleChildScrollView(
+          padding: const EdgeInsets.all(24),
+          child: Form(
+            key: _formKey,
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                _SectionCard(
+                  title: 'Informasi Kelas',
+                  children: [
+                    TextFormField(
+                      controller: _namaKelasController,
+                      textCapitalization: TextCapitalization.characters,
+                      decoration: _inputDecoration(
+                        label: 'Nama Kelas',
+                        icon: Icons.class_rounded,
+                      ),
+                      validator: (value) {
+                        final text = value?.trim() ?? '';
+                        if (text.isEmpty) {
+                          return 'Nama kelas wajib diisi';
+                        }
+                        final normalized = _normalizeKelasName(text);
+                        final current =
+                            _normalizeKelasName(widget.kelas.namaKelas);
+                        final duplicated = widget.existingKelas
+                            .map(_normalizeKelasName)
+                            .any((item) => item == normalized);
+                        if (normalized != current && duplicated) {
+                          return 'Nama kelas sudah digunakan';
+                        }
+                        return null;
+                      },
+                    ),
+                    const SizedBox(height: 12),
+                    Text(
+                      'Wali kelas tetap diatur melalui menu edit data guru.',
+                      style: Theme.of(context).textTheme.bodySmall?.copyWith(
+                            color: const Color(0xFF64748B),
+                            fontWeight: FontWeight.w600,
+                          ),
+                    ),
+                  ],
+                ),
+                const SizedBox(height: 24),
+                SizedBox(
+                  width: double.infinity,
+                  height: 54,
+                  child: FilledButton.icon(
+                    onPressed: _isLoading ? null : _submit,
+                    icon: _isLoading
+                        ? const SizedBox(
+                            width: 18,
+                            height: 18,
+                            child: CircularProgressIndicator(strokeWidth: 2),
+                          )
+                        : const Icon(Icons.save_rounded),
+                    label: Text(_isLoading ? 'Menyimpan' : 'Simpan Perubahan'),
+                    style: FilledButton.styleFrom(
+                      backgroundColor: const Color(0xFF2563EB),
+                      shape: RoundedRectangleBorder(
+                        borderRadius: BorderRadius.circular(14),
+                      ),
+                    ),
+                  ),
+                ),
+              ],
+            ),
+          ),
+        ),
+      ),
+    );
   }
 }
 
@@ -838,9 +1040,13 @@ class _EmptyState extends StatelessWidget {
 class _KelasGroupedTabs extends StatefulWidget {
   const _KelasGroupedTabs({
     required this.data,
+    required this.onEdit,
+    required this.onDelete,
   });
 
   final _KelasListData data;
+  final ValueChanged<_KelasItem> onEdit;
+  final ValueChanged<_KelasItem> onDelete;
 
   @override
   State<_KelasGroupedTabs> createState() => _KelasGroupedTabsState();
@@ -880,6 +1086,8 @@ class _KelasGroupedTabsState extends State<_KelasGroupedTabs> {
           accentColor: _kelasGroupColor(_selectedGrade),
           kelas: selectedKelas,
           guruById: widget.data.guruById,
+          onEdit: widget.onEdit,
+          onDelete: widget.onDelete,
         ),
       ],
     );
@@ -969,6 +1177,8 @@ class _KelasGroupCard extends StatelessWidget {
     required this.accentColor,
     required this.kelas,
     required this.guruById,
+    required this.onEdit,
+    required this.onDelete,
   });
 
   final String title;
@@ -976,6 +1186,8 @@ class _KelasGroupCard extends StatelessWidget {
   final Color accentColor;
   final List<_KelasItem> kelas;
   final Map<int, String> guruById;
+  final ValueChanged<_KelasItem> onEdit;
+  final ValueChanged<_KelasItem> onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -1066,6 +1278,8 @@ class _KelasGroupCard extends StatelessWidget {
                       waliKelasName: item.waliKelasId == null
                           ? null
                           : guruById[item.waliKelasId!],
+                      onEdit: () => onEdit(item),
+                      onDelete: () => onDelete(item),
                     ),
                   ),
               ],
@@ -1081,11 +1295,15 @@ class _KelasMiniCard extends StatelessWidget {
     required this.kelas,
     required this.accentColor,
     required this.waliKelasName,
+    required this.onEdit,
+    required this.onDelete,
   });
 
   final _KelasItem kelas;
   final Color accentColor;
   final String? waliKelasName;
+  final VoidCallback onEdit;
+  final VoidCallback onDelete;
 
   @override
   Widget build(BuildContext context) {
@@ -1110,56 +1328,120 @@ class _KelasMiniCard extends StatelessWidget {
           ),
           const SizedBox(width: 12),
           Expanded(
-            child: Text(
-              kelas.namaKelas,
-              maxLines: 1,
-              overflow: TextOverflow.ellipsis,
-              style: Theme.of(context).textTheme.titleSmall?.copyWith(
-                    color: const Color(0xFF191B23),
-                    fontWeight: FontWeight.w800,
-                  ),
-            ),
-          ),
-          const SizedBox(width: 8),
-          Column(
-            crossAxisAlignment: CrossAxisAlignment.end,
-            children: [
-              Container(
-                padding: const EdgeInsets.symmetric(horizontal: 9, vertical: 5),
-                decoration: BoxDecoration(
-                  color: Colors.white,
-                  borderRadius: BorderRadius.circular(999),
-                  border: Border.all(color: const Color(0xFFE2E8F0)),
-                ),
-                child: Text(
-                  kelas.waliKelasId == null ? 'Belum ada wali' : 'Ada wali',
-                  style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                        color: kelas.waliKelasId == null
-                            ? const Color(0xFF64748B)
-                            : const Color(0xFF078B4F),
+            child: Column(
+              crossAxisAlignment: CrossAxisAlignment.start,
+              children: [
+                Text(
+                  kelas.namaKelas,
+                  maxLines: 1,
+                  overflow: TextOverflow.ellipsis,
+                  style: Theme.of(context).textTheme.titleSmall?.copyWith(
+                        color: const Color(0xFF191B23),
                         fontWeight: FontWeight.w800,
                       ),
                 ),
-              ),
-              if (kelas.waliKelasId != null) ...[
-                const SizedBox(height: 5),
-                ConstrainedBox(
-                  constraints: const BoxConstraints(maxWidth: 118),
-                  child: Text(
-                    waliKelasName ?? 'Wali tidak ditemukan',
-                    maxLines: 1,
-                    overflow: TextOverflow.ellipsis,
-                    textAlign: TextAlign.right,
-                    style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: const Color(0xFF64748B),
-                          fontWeight: FontWeight.w700,
+                const SizedBox(height: 7),
+                Wrap(
+                  spacing: 7,
+                  runSpacing: 5,
+                  crossAxisAlignment: WrapCrossAlignment.center,
+                  children: [
+                    Container(
+                      padding: const EdgeInsets.symmetric(
+                        horizontal: 9,
+                        vertical: 5,
+                      ),
+                      decoration: BoxDecoration(
+                        color: Colors.white,
+                        borderRadius: BorderRadius.circular(999),
+                        border: Border.all(color: const Color(0xFFE2E8F0)),
+                      ),
+                      child: Text(
+                        kelas.waliKelasId == null
+                            ? 'Belum ada wali'
+                            : 'Ada wali',
+                        style:
+                            Theme.of(context).textTheme.labelSmall?.copyWith(
+                                  color: kelas.waliKelasId == null
+                                      ? const Color(0xFF64748B)
+                                      : const Color(0xFF078B4F),
+                                  fontWeight: FontWeight.w800,
+                                ),
+                      ),
+                    ),
+                    if (kelas.waliKelasId != null)
+                      ConstrainedBox(
+                        constraints: const BoxConstraints(maxWidth: 150),
+                        child: Text(
+                          waliKelasName ?? 'Wali tidak ditemukan',
+                          maxLines: 1,
+                          overflow: TextOverflow.ellipsis,
+                          style:
+                              Theme.of(context).textTheme.labelSmall?.copyWith(
+                                    color: const Color(0xFF64748B),
+                                    fontWeight: FontWeight.w700,
+                                  ),
                         ),
-                  ),
+                      ),
+                  ],
                 ),
               ],
+            ),
+          ),
+          const SizedBox(width: 8),
+          Row(
+            mainAxisSize: MainAxisSize.min,
+            children: [
+              _MiniActionButton(
+                tooltip: 'Edit kelas',
+                icon: Icons.edit_rounded,
+                color: accentColor,
+                onPressed: onEdit,
+              ),
+              const SizedBox(width: 6),
+              _MiniActionButton(
+                tooltip: 'Hapus kelas',
+                icon: Icons.delete_outline_rounded,
+                color: const Color(0xFFDC2626),
+                onPressed: onDelete,
+              ),
             ],
           ),
         ],
+      ),
+    );
+  }
+}
+
+class _MiniActionButton extends StatelessWidget {
+  const _MiniActionButton({
+    required this.tooltip,
+    required this.icon,
+    required this.color,
+    required this.onPressed,
+  });
+
+  final String tooltip;
+  final IconData icon;
+  final Color color;
+  final VoidCallback onPressed;
+
+  @override
+  Widget build(BuildContext context) {
+    return Tooltip(
+      message: tooltip,
+      child: Material(
+        color: color.withOpacity(0.10),
+        borderRadius: BorderRadius.circular(10),
+        child: InkWell(
+          onTap: onPressed,
+          borderRadius: BorderRadius.circular(10),
+          child: SizedBox(
+            width: 34,
+            height: 34,
+            child: Icon(icon, color: color, size: 18),
+          ),
+        ),
       ),
     );
   }
@@ -1190,7 +1472,7 @@ class _EmptyKelasGroup extends StatelessWidget {
               style: Theme.of(context).textTheme.bodySmall?.copyWith(
                     color: const Color(0xFF64748B),
                     fontWeight: FontWeight.w700,
-                      ),
+                  ),
             ),
           ),
         ],

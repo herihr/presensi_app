@@ -227,7 +227,7 @@ class TambahJadwalPage extends StatefulWidget {
 class _TambahJadwalPageState extends State<TambahJadwalPage> {
   final _formKey = GlobalKey<FormState>();
   final _api = ApiService();
-  final _jamMulaiController = TextEditingController(text: '07:00');
+  final _jamMulaiController = TextEditingController(text: '07:30');
 
   bool _isLoading = false;
   bool _isLoadingOptions = true;
@@ -238,6 +238,7 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
   int _breakAfterIndex = 0;
   List<_OptionItem> _kelasOptions = const [];
   List<_OptionItem> _mapelOptions = const [];
+  List<_JadwalItem> _existingSchedules = const [];
   final List<_ScheduleEntry> _entries = [];
   final Map<int, List<_GuruOption>> _guruByMapel = {};
   late final List<_JadwalItem> _initialSchedules;
@@ -268,6 +269,7 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
       final responses = await Future.wait([
         _api.get('/api/kelas/'),
         _api.get('/api/mata-pelajaran/'),
+        _api.get('/api/jadwal/'),
       ]);
 
       if (!mounted) return;
@@ -280,6 +282,9 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
         }
         _mapelOptions = (responses[1] as List)
             .map((item) => _OptionItem.fromJson(item, 'nama_mapel'))
+            .toList();
+        _existingSchedules = (responses[2] as List)
+            .map((item) => _JadwalItem.fromJson(item as Map<String, dynamic>))
             .toList();
         _isLoadingOptions = false;
       });
@@ -440,6 +445,18 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
       return;
     }
 
+    for (var index = 0; index < _entries.length; index++) {
+      final entry = _entries[index];
+      final conflict = _guruConflictForEntry(index, entry.guruId);
+      if (conflict != null) {
+        _showError(
+          'Guru pada mapel ke-${index + 1} bentrok dengan jadwal '
+          '${conflict.hari} ${conflict.jamMulai} - ${conflict.jamSelesai}.',
+        );
+        return;
+      }
+    }
+
     setState(() => _isLoading = true);
 
     try {
@@ -566,6 +583,7 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
                                           _gradeForKelasId(selectedKelasId) !=
                                               value) {
                                         _selectedKelasId = null;
+                                        _selectedHari = null;
                                       }
                                     });
                                   },
@@ -594,7 +612,13 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
                             onChanged: _selectedGrade == null || _isEditMode
                                 ? null
                                 : (value) {
-                                    setState(() => _selectedKelasId = value);
+                                    setState(() {
+                                      _selectedKelasId = value;
+                                      if (!_availableDaysForSelectedClass()
+                                          .contains(_selectedHari)) {
+                                        _selectedHari = null;
+                                      }
+                                    });
                                   },
                             validator: (value) {
                               if (_selectedGrade == null) {
@@ -614,7 +638,7 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
                               label: 'Hari',
                               icon: Icons.calendar_month_rounded,
                             ),
-                            items: _days
+                            items: _availableDaysForSelectedClass()
                                 .map(
                                   (item) => DropdownMenuItem<String>(
                                     value: item,
@@ -626,10 +650,32 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
                               setState(() => _selectedHari = value);
                             },
                             validator: (value) {
+                              if (_selectedKelasId == null) {
+                                return 'Pilih kelas terlebih dahulu';
+                              }
+                              if (_availableDaysForSelectedClass().isEmpty) {
+                                return 'Semua hari kelas ini sudah memiliki jadwal';
+                              }
                               if (value == null) return 'Hari wajib dipilih';
                               return null;
                             },
                           ),
+                          if (!_isEditMode &&
+                              _selectedKelasId != null &&
+                              _usedDaysForSelectedClass().isNotEmpty) ...[
+                            const SizedBox(height: 8),
+                            Text(
+                              'Hari yang sudah memiliki jadwal tidak ditampilkan. '
+                              'Untuk mengubah jadwal hari tersebut, gunakan tombol edit '
+                              'pada data jadwal.',
+                              style: Theme.of(context)
+                                  .textTheme
+                                  .bodySmall
+                                  ?.copyWith(
+                                    color: const Color(0xFF737686),
+                                  ),
+                            ),
+                          ],
                           const SizedBox(height: 14),
                           TextFormField(
                             controller: _jamMulaiController,
@@ -713,6 +759,12 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
                               entry: _entries[index],
                               mapelOptions: _filteredMapelOptions(index),
                               guruOptions: _guruOptionsForEntry(_entries[index]),
+                              guruDisabledReason: (guruId) {
+                                final conflict =
+                                    _guruConflictForEntry(index, guruId);
+                                if (conflict == null) return null;
+                                return 'Bentrok ${conflict.jamMulai} - ${conflict.jamSelesai}';
+                              },
                               onMapelChanged: (value) async {
                                 setState(() {
                                   _entries[index].mapelId = value;
@@ -803,6 +855,55 @@ class _TambahJadwalPageState extends State<TambahJadwalPage> {
     return _guruByMapel[mapelId] ?? const [];
   }
 
+  List<String> _availableDaysForSelectedClass() {
+    if (_isEditMode) return _days;
+    final usedDays = _usedDaysForSelectedClass();
+    return _days.where((day) => !usedDays.contains(day)).toList();
+  }
+
+  Set<String> _usedDaysForSelectedClass() {
+    final kelasId = _selectedKelasId;
+    if (kelasId == null) return const <String>{};
+    return _existingSchedules
+        .where((item) => item.kelasId == kelasId)
+        .map((item) => item.hari)
+        .where((hari) => hari.isNotEmpty)
+        .toSet();
+  }
+
+  _JadwalItem? _guruConflictForEntry(int entryIndex, int? guruId) {
+    if (guruId == null) return null;
+    final hari = _selectedHari;
+    if (hari == null) return null;
+
+    final preview = _previewForEntry(entryIndex);
+    if (preview == null) return null;
+    final start = _parseTime(preview.jamMulai);
+    final end = _parseTime(preview.jamSelesai);
+    if (start == null || end == null) return null;
+
+    final ignoredIds = _initialSchedules.map((item) => item.id).toSet();
+    for (final item in _existingSchedules) {
+      if (ignoredIds.contains(item.id)) continue;
+      if (item.guruId != guruId || item.hari != hari) continue;
+
+      final existingStart = _parseTime(item.jamMulai);
+      final existingEnd = _parseTime(item.jamSelesai);
+      if (existingStart == null || existingEnd == null) continue;
+      if (_timeRangesOverlap(start, end, existingStart, existingEnd)) {
+        return item;
+      }
+    }
+    return null;
+  }
+
+  _SchedulePreview? _previewForEntry(int entryIndex) {
+    for (final item in _buildPreview()) {
+      if (!item.isBreak && item.entryIndex == entryIndex) return item;
+    }
+    return null;
+  }
+
   String _labelForMapel(int? mapelId) {
     if (mapelId == null) return 'Mata pelajaran belum dipilih';
     return _mapelOptions
@@ -820,6 +921,7 @@ class _ScheduleEntryEditor extends StatelessWidget {
     required this.entry,
     required this.mapelOptions,
     required this.guruOptions,
+    required this.guruDisabledReason,
     required this.onMapelChanged,
     required this.onGuruChanged,
     required this.onLessonHoursChanged,
@@ -829,6 +931,7 @@ class _ScheduleEntryEditor extends StatelessWidget {
   final _ScheduleEntry entry;
   final List<_OptionItem> mapelOptions;
   final List<_GuruOption> guruOptions;
+  final String? Function(int guruId) guruDisabledReason;
   final ValueChanged<int?> onMapelChanged;
   final ValueChanged<int?> onGuruChanged;
   final ValueChanged<int?> onLessonHoursChanged;
@@ -862,6 +965,8 @@ class _ScheduleEntryEditor extends StatelessWidget {
           const SizedBox(height: 12),
           DropdownButtonFormField<int>(
             value: mapelValue,
+            isExpanded: true,
+            menuMaxHeight: 360,
             decoration: _inputDecoration(
               label: 'Nama Pelajaran',
               icon: Icons.menu_book_rounded,
@@ -870,7 +975,7 @@ class _ScheduleEntryEditor extends StatelessWidget {
                 .map(
                   (item) => DropdownMenuItem<int>(
                     value: item.id,
-                    child: Text(item.label),
+                    child: _DropdownText(item.label),
                   ),
                 )
                 .toList(),
@@ -883,17 +988,25 @@ class _ScheduleEntryEditor extends StatelessWidget {
           const SizedBox(height: 12),
           DropdownButtonFormField<int>(
             value: guruValue,
+            isExpanded: true,
+            menuMaxHeight: 360,
             decoration: _inputDecoration(
               label: 'Nama Guru',
               icon: Icons.person_rounded,
             ),
             items: guruOptions
-                .map(
-                  (item) => DropdownMenuItem<int>(
+                .map((item) {
+                  final disabledReason = guruDisabledReason(item.id);
+                  final isDisabled = disabledReason != null;
+                  return DropdownMenuItem<int>(
                     value: item.id,
-                    child: Text(item.nama),
-                  ),
-                )
+                    enabled: !isDisabled,
+                    child: _GuruDropdownItem(
+                      name: item.nama,
+                      disabledReason: disabledReason,
+                    ),
+                  );
+                })
                 .toList(),
             onChanged: guruOptions.isEmpty ? null : onGuruChanged,
             validator: (value) {
@@ -913,6 +1026,8 @@ class _ScheduleEntryEditor extends StatelessWidget {
           const SizedBox(height: 12),
           DropdownButtonFormField<int>(
             value: entry.lessonHours,
+            isExpanded: true,
+            menuMaxHeight: 320,
             decoration: _inputDecoration(
               label: 'Jumlah Jam Pelajaran',
               icon: Icons.timer_rounded,
@@ -921,7 +1036,7 @@ class _ScheduleEntryEditor extends StatelessWidget {
                 .map(
                   (item) => DropdownMenuItem<int>(
                     value: item,
-                    child: Text('$item JP (${item * 40} menit)'),
+                    child: _DropdownText('$item JP (${item * 40} menit)'),
                   ),
                 )
                 .toList(),
@@ -984,6 +1099,68 @@ class _PreviewRow extends StatelessWidget {
           ),
         ),
       ],
+    );
+  }
+}
+
+class _GuruDropdownItem extends StatelessWidget {
+  const _GuruDropdownItem({
+    required this.name,
+    required this.disabledReason,
+  });
+
+  final String name;
+  final String? disabledReason;
+
+  @override
+  Widget build(BuildContext context) {
+    final isDisabled = disabledReason != null;
+    return Row(
+      children: [
+        Expanded(
+          child: Text(
+            name,
+            maxLines: 1,
+            overflow: TextOverflow.ellipsis,
+            style: TextStyle(
+              color: isDisabled ? const Color(0xFF94A3B8) : null,
+              fontWeight: isDisabled ? FontWeight.w600 : null,
+            ),
+          ),
+        ),
+        if (isDisabled) ...[
+          const SizedBox(width: 8),
+          Container(
+            padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 4),
+            decoration: BoxDecoration(
+              color: const Color(0xFFFEE2E2),
+              borderRadius: BorderRadius.circular(999),
+            ),
+            child: Text(
+              disabledReason!,
+              style: Theme.of(context).textTheme.labelSmall?.copyWith(
+                    color: const Color(0xFFB91C1C),
+                    fontWeight: FontWeight.w800,
+                  ),
+            ),
+          ),
+        ],
+      ],
+    );
+  }
+}
+
+class _DropdownText extends StatelessWidget {
+  const _DropdownText(this.value);
+
+  final String value;
+
+  @override
+  Widget build(BuildContext context) {
+    return Text(
+      value,
+      maxLines: 1,
+      overflow: TextOverflow.ellipsis,
     );
   }
 }
@@ -1481,7 +1658,12 @@ InputDecoration _inputDecoration({
 }) {
   return InputDecoration(
     labelText: label,
-    prefixIcon: Icon(icon),
+    prefixIcon: Icon(icon, size: 22),
+    prefixIconConstraints: const BoxConstraints(
+      minWidth: 46,
+      minHeight: 46,
+    ),
+    contentPadding: const EdgeInsets.fromLTRB(12, 14, 10, 14),
     filled: true,
     fillColor: const Color(0xFFF8FAFF),
     border: OutlineInputBorder(
@@ -1739,6 +1921,15 @@ int _breakIndexFromSchedules(List<_JadwalItem> schedules) {
   }
 
   return 0;
+}
+
+bool _timeRangesOverlap(
+  DateTime startA,
+  DateTime endA,
+  DateTime startB,
+  DateTime endB,
+) {
+  return startA.isBefore(endB) && startB.isBefore(endA);
 }
 
 int? _gradeFromClassName(String name) {

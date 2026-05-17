@@ -14,7 +14,7 @@ class PresensiController {
     required int jadwalId,
     required int guruId,
   }) async {
-    final face = await _detector.detect(image);
+    final face = await _detector.cropFace(image);
     final embedding = await _embedder.embed(face);
 
     final dbEmbeddings = await _service.getEmbeddings();

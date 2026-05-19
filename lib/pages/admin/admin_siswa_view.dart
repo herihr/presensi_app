@@ -5,8 +5,8 @@ import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
-import '../../ai/face_embedder.dart';
-import '../../ai/realtime_face_detector.dart';
+import '../../ai/shared/face_embedder.dart';
+import '../../ai/static_face/face_detector.dart';
 import '../../services/api_service.dart';
 import '../../utils/app_alert.dart';
 
@@ -224,7 +224,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
   final _alamatController = TextEditingController();
   final _imagePicker = ImagePicker();
   final _faceEmbedder = FaceEmbedder();
-  final _faceDetector = RealtimeFaceDetector();
+  final _faceDetector = FaceDetector();
 
   bool _isLoading = false;
   bool _isPickingPhoto = false;
@@ -421,20 +421,39 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
       return false;
     }
 
+    var successCount = 0;
+    final failedPhotos = <String>[];
+
     try {
       for (final fotoPath in _embeddingPhotoPaths) {
         if (fotoPath.startsWith('http://') || fotoPath.startsWith('https://')) {
           continue;
         }
-        final embedding = await _createEmbeddingFromDetectedFace(fotoPath);
-        await _api.post('/api/embedding/', {
-          'siswa_id': siswaId,
-          'embedding': embedding,
-        });
+        try {
+          final embedding = await _createEmbeddingFromDetectedFace(fotoPath);
+          await _api.post('/api/embedding/', {
+            'siswa_id': siswaId,
+            'embedding': embedding,
+          });
+          successCount++;
+        } catch (error) {
+          failedPhotos.add(fotoPath);
+          debugPrint('Foto embedding gagal diproses: $fotoPath -> $error');
+        }
+      }
+      if (successCount == 0) {
+        throw Exception(
+          'Tidak ada foto embedding yang berhasil dideteksi wajahnya',
+        );
       }
       await _api.put('/api/siswa/$siswaId', {
         'embedding_status': 'diproses',
       });
+      if (failedPhotos.isNotEmpty) {
+        debugPrint(
+          'Embedding tersimpan dari $successCount foto. ${failedPhotos.length} foto dilewati karena wajah tidak terdeteksi.',
+        );
+      }
       return true;
     } catch (error) {
       await _api.put('/api/siswa/$siswaId', {
@@ -464,12 +483,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
       final itemArea = item.width * item.height;
       return itemArea > bestArea ? item : best;
     });
-    final faceImage = bestFace.faceImage;
-    if (faceImage == null) {
-      throw Exception('Crop wajah dari foto embedding gagal');
-    }
-
-    return _faceEmbedder.embedImage(faceImage);
+    return _faceEmbedder.embedImage(bestFace.croppedFace);
   }
 
   String _initialEmbeddingStatus() {

@@ -1,10 +1,11 @@
+import 'dart:async';
 import 'dart:convert';
 import 'dart:io';
 import 'package:http/http.dart' as http;
 import '../utils/constants.dart';
 
 class ApiService {
-  final String baseUrl = Constants.baseUrl; // emulator
+  static String _activeBaseUrl = Constants.baseUrl;
   static String? _accessToken;
 
   static void setToken(String token) {
@@ -23,35 +24,43 @@ class ApiService {
   }
 
   Future<dynamic> get(String endpoint) async {
-    final res = await http.get(
-      Uri.parse("$baseUrl$endpoint"),
-      headers: _headers,
+    final res = await _sendWithFallback(
+      endpoint,
+      (uri) => http.get(uri, headers: _headers),
     );
     return _decodeResponse(res);
   }
 
   Future<dynamic> post(String endpoint, Map data) async {
-    final res = await http.post(
-      Uri.parse("$baseUrl$endpoint"),
-      headers: _headers,
-      body: jsonEncode(data),
+    final encodedBody = jsonEncode(data);
+    final res = await _sendWithFallback(
+      endpoint,
+      (uri) => http.post(
+        uri,
+        headers: _headers,
+        body: encodedBody,
+      ),
     );
     return _decodeResponse(res);
   }
 
   Future<dynamic> put(String endpoint, Map data) async {
-    final res = await http.put(
-      Uri.parse("$baseUrl$endpoint"),
-      headers: _headers,
-      body: jsonEncode(data),
+    final encodedBody = jsonEncode(data);
+    final res = await _sendWithFallback(
+      endpoint,
+      (uri) => http.put(
+        uri,
+        headers: _headers,
+        body: encodedBody,
+      ),
     );
     return _decodeResponse(res);
   }
 
   Future<dynamic> delete(String endpoint) async {
-    final res = await http.delete(
-      Uri.parse("$baseUrl$endpoint"),
-      headers: _headers,
+    final res = await _sendWithFallback(
+      endpoint,
+      (uri) => http.delete(uri, headers: _headers),
     );
     return _decodeResponse(res);
   }
@@ -61,21 +70,10 @@ class ApiService {
     String filePath, {
     String fieldName = 'file',
   }) async {
-    final request = http.MultipartRequest(
-      'POST',
-      Uri.parse('$baseUrl$endpoint'),
-    );
-
-    if (_accessToken != null) {
-      request.headers['Authorization'] = 'Bearer $_accessToken';
-    }
-
-    request.files.add(
-      await http.MultipartFile.fromPath(fieldName, filePath),
-    );
-
-    final streamed = await request.send();
-    final response = await http.Response.fromStream(streamed);
+    final response = await _sendMultipartWithFallback(endpoint, () async {
+      final file = await http.MultipartFile.fromPath(fieldName, filePath);
+      return [file];
+    });
     return _decodeResponse(response);
   }
 
@@ -85,21 +83,11 @@ class ApiService {
     String fieldName = 'file',
     String fileName = 'photo.jpg',
   }) async {
-    final request = http.MultipartRequest(
-      'POST',
-      Uri.parse('$baseUrl$endpoint'),
-    );
-
-    if (_accessToken != null) {
-      request.headers['Authorization'] = 'Bearer $_accessToken';
-    }
-
-    request.files.add(
-      http.MultipartFile.fromBytes(fieldName, bytes, filename: fileName),
-    );
-
-    final streamed = await request.send();
-    final response = await http.Response.fromStream(streamed);
+    final response = await _sendMultipartWithFallback(endpoint, () async {
+      return [
+        http.MultipartFile.fromBytes(fieldName, bytes, filename: fileName),
+      ];
+    });
     return _decodeResponse(response);
   }
 
@@ -139,7 +127,90 @@ class ApiService {
   }
 
   static String resolveMediaUrl(String? path) {
-    return Constants.mediaUrl(path);
+    if (path == null || path.isEmpty) return '';
+    if (path.startsWith('http://') ||
+        path.startsWith('https://') ||
+        path.startsWith('data:image/')) {
+      return path;
+    }
+    if (path.startsWith('/')) return '$_activeBaseUrl$path';
+    return path;
+  }
+
+  Future<http.Response> _sendWithFallback(
+    String endpoint,
+    Future<http.Response> Function(Uri uri) send,
+  ) async {
+    Object? lastError;
+
+    for (final baseUrl in _candidateBaseUrls()) {
+      try {
+        final response = await send(Uri.parse('$baseUrl$endpoint')).timeout(
+          const Duration(seconds: 12),
+        );
+        _activeBaseUrl = baseUrl;
+        return response;
+      } on SocketException catch (error) {
+        lastError = error;
+      } on TimeoutException catch (error) {
+        lastError = error;
+      } on http.ClientException catch (error) {
+        lastError = error;
+      } on HandshakeException catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw Exception('Tidak bisa terhubung ke backend: $lastError');
+  }
+
+  Future<http.Response> _sendMultipartWithFallback(
+    String endpoint,
+    Future<List<http.MultipartFile>> Function() buildFiles,
+  ) async {
+    Object? lastError;
+
+    for (final baseUrl in _candidateBaseUrls()) {
+      try {
+        final request = http.MultipartRequest(
+          'POST',
+          Uri.parse('$baseUrl$endpoint'),
+        );
+
+        if (_accessToken != null) {
+          request.headers['Authorization'] = 'Bearer $_accessToken';
+        }
+
+        request.files.addAll(await buildFiles());
+
+        final streamed = await request.send().timeout(
+          const Duration(seconds: 30),
+        );
+        final response = await http.Response.fromStream(streamed);
+        _activeBaseUrl = baseUrl;
+        return response;
+      } on SocketException catch (error) {
+        lastError = error;
+      } on TimeoutException catch (error) {
+        lastError = error;
+      } on http.ClientException catch (error) {
+        lastError = error;
+      } on HandshakeException catch (error) {
+        lastError = error;
+      }
+    }
+
+    throw Exception('Tidak bisa terhubung ke backend: $lastError');
+  }
+
+  List<String> _candidateBaseUrls() {
+    if (!Constants.enableBackendFallback) return [Constants.baseUrl];
+
+    final urls = <String>[
+      _activeBaseUrl,
+      ...Constants.fallbackBaseUrls,
+    ];
+    return urls.toSet().toList();
   }
 
   dynamic _decodeResponse(http.Response res) {

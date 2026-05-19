@@ -1,9 +1,14 @@
+import 'dart:async';
+import 'dart:io';
 import 'dart:math' as math;
 
 import 'package:camera/camera.dart';
 import 'package:flutter/material.dart';
+import 'package:flutter/services.dart';
 
-import '../../ai/realtime_face_detector.dart';
+import '../../ai/realtime/realtime_ai_config.dart';
+import '../../ai/realtime/realtime_ai_processor.dart';
+import '../../ai/shared/ai_models.dart';
 import '../../services/api_service.dart';
 
 class RealtimePresensiPage extends StatefulWidget {
@@ -33,8 +38,9 @@ class RealtimePresensiPage extends StatefulWidget {
 }
 
 class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
-  final _aiProcessor = RealtimeAiProcessor();
+  late final RealtimeAiProcessor _aiProcessor;
   final _api = ApiService();
+  final List<String> _timingLogs = [];
 
   CameraController? _cameraController;
   List<CameraDescription> _cameras = const [];
@@ -45,15 +51,24 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
   List<AiRecognizedFaceBox> _recognizedFaces = const [];
   final Set<int> _reportedStudentIds = {};
   Size? _lastFrameSize;
+  Size? _scannerCanvasSize;
+  bool _timingReportSaved = false;
 
   @override
   void initState() {
     super.initState();
+    _aiProcessor = RealtimeAiProcessor(
+      onTimingLog: (log) {
+        if (!RealtimeAiConfig.enableTimingLogs) return;
+        _timingLogs.add(log);
+      },
+    );
     _initialize();
   }
 
   @override
   void dispose() {
+    unawaited(_saveTimingReport());
     _stopCamera();
     _aiProcessor.stop();
     super.dispose();
@@ -130,9 +145,11 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
     );
 
     await controller.initialize();
-    debugPrint(
-      'Kamera aktif: ${camera.lensDirection.name}, sensorOrientation=${camera.sensorOrientation}',
-    );
+    if (!RealtimeAiConfig.enableTimingLogs) {
+      debugPrint(
+        'Kamera aktif: ${camera.lensDirection.name}, sensorOrientation=${camera.sensorOrientation}',
+      );
+    }
     await controller.startImageStream(_onCameraFrame);
 
     if (!mounted) {
@@ -224,9 +241,11 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
     try {
       final rotationDegrees =
           _cameraController?.description.sensorOrientation ?? 0;
+      final scanRegion = _scanRectInFrame(image, rotationDegrees);
       final recognized = await _aiProcessor.processFrame(
         image,
         rotationDegrees: rotationDegrees,
+        scanRegion: scanRegion,
       );
       if (recognized == null) return;
 
@@ -238,9 +257,11 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
         _status = recognized.isEmpty
             ? 'Mencari wajah pada frame kamera...'
             : 'Wajah terdeteksi: ${recognized.map((item) => item.name).join(', ')}';
-        debugPrint(
-          'UI update wajah: ${recognized.length}, frameSize=${_lastFrameSize!.width.toStringAsFixed(0)}x${_lastFrameSize!.height.toStringAsFixed(0)}',
-        );
+        if (!RealtimeAiConfig.enableTimingLogs) {
+          debugPrint(
+            'UI update wajah: ${recognized.length}, frameSize=${_lastFrameSize!.width.toStringAsFixed(0)}x${_lastFrameSize!.height.toStringAsFixed(0)}',
+          );
+        }
       });
     } catch (error) {
       if (!mounted) return;
@@ -271,9 +292,46 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
     final isRotated = normalizedRotation == 90 || normalizedRotation == 270;
     final width = isRotated ? image.height.toDouble() : image.width.toDouble();
     final height = isRotated ? image.width.toDouble() : image.height.toDouble();
-    const maxAiFrameSide = 480.0;
-    final scale = math.min(1.0, maxAiFrameSide / math.max(width, height));
-    return Size(width * scale, height * scale);
+    return Size(width, height);
+  }
+
+  Rect? _scanRectInFrame(CameraImage image, int rotationDegrees) {
+    final canvasSize = _scannerCanvasSize;
+    if (canvasSize == null || canvasSize.width <= 0 || canvasSize.height <= 0) {
+      return null;
+    }
+
+    final frame = _processedFrameSize(image, rotationDegrees);
+    if (frame.width <= 0 || frame.height <= 0) return null;
+
+    final scanSize = canvasSize.width * 0.72;
+    final scanRect = Rect.fromCenter(
+      center: Offset(canvasSize.width / 2, canvasSize.height / 2),
+      width: scanSize,
+      height: scanSize,
+    );
+
+    final scale = math.max(
+      canvasSize.width / frame.width,
+      canvasSize.height / frame.height,
+    );
+    final drawnWidth = frame.width * scale;
+    final drawnHeight = frame.height * scale;
+    final offsetX = (canvasSize.width - drawnWidth) / 2;
+    final offsetY = (canvasSize.height - drawnHeight) / 2;
+
+    final left =
+        ((scanRect.left - offsetX) / scale).clamp(0.0, frame.width).toDouble();
+    final top =
+        ((scanRect.top - offsetY) / scale).clamp(0.0, frame.height).toDouble();
+    final right = ((scanRect.right - offsetX) / scale)
+        .clamp(0.0, frame.width)
+        .toDouble();
+    final bottom =
+        ((scanRect.bottom - offsetY) / scale).clamp(0.0, frame.height).toDouble();
+
+    if (right <= left || bottom <= top) return null;
+    return Rect.fromLTRB(left, top, right, bottom);
   }
 
   Future<void> _stopCamera() async {
@@ -292,6 +350,92 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
     }
   }
 
+  Future<void> _saveTimingReport() async {
+    if (!RealtimeAiConfig.enableTimingLogs ||
+        _timingLogs.isEmpty ||
+        _timingReportSaved) {
+      return;
+    }
+    _timingReportSaved = true;
+
+    final now = DateTime.now();
+    final stamp =
+        '${now.year}${_twoDigits(now.month)}${_twoDigits(now.day)}_'
+        '${_twoDigits(now.hour)}${_twoDigits(now.minute)}'
+        '${_twoDigits(now.second)}';
+    final fileName = 'presensi_ai_timing_$stamp.txt';
+    final content = [
+      'Laporan Waktu Komputasi Presensi AI',
+      'Dibuat: ${_formatDateTime(now)}',
+      'Mata pelajaran: ${widget.mapel}',
+      'Kelas: ${widget.className}',
+      'Jadwal ID: ${widget.jadwalId}',
+      'Kelas ID: ${widget.kelasId}',
+      'Guru ID: ${widget.guruId}',
+      'Target FPS proses AI: ${RealtimeAiConfig.targetFps}',
+      'Recognition threshold: ${RealtimeAiConfig.recognitionThreshold}',
+      'Minimal ukuran wajah dikenali: ${RealtimeAiConfig.minRecognizableFaceSize}px',
+      'Ukuran input YOLO: ${RealtimeAiConfig.yoloInputWidth}x${RealtimeAiConfig.yoloInputHeight}px',
+      '',
+      'Urutan proses utama:',
+      '1. Frame kamera diterima dari image stream.',
+      '2. Plane YUV dikonversi menjadi RGB.',
+      '3. Frame diputar sesuai orientasi sensor.',
+      '4. Frame dicrop sesuai area scan biru.',
+      '5. YOLO melakukan resize, input tensor, inference, decode box, NMS, lalu crop wajah.',
+      '6. FaceNet membuat embedding wajah.',
+      '7. Cosine similarity mencari siswa paling cocok dari embedding database.',
+      '',
+      'Hasil profiling per frame:',
+      ..._timingLogs.expand((log) => [log, '']),
+    ].join('\n');
+
+    try {
+      const channel = MethodChannel('presensi_app/downloads');
+      await channel.invokeMethod<String>('saveReport', {
+        'fileName': fileName,
+        'content': content,
+        'mimeType': 'text/plain',
+      });
+    } catch (_) {
+      await _saveTimingReportFallback(fileName, content);
+    }
+  }
+
+  Future<void> _saveTimingReportFallback(
+    String fileName,
+    String content,
+  ) async {
+    final directories = <Directory>[
+      Directory('/storage/emulated/0/Download'),
+      Directory('/storage/emulated/0/Downloads'),
+      Directory.systemTemp,
+    ];
+
+    for (final directory in directories) {
+      try {
+        if (!await directory.exists()) {
+          await directory.create(recursive: true);
+        }
+        final separator = directory.path.endsWith(Platform.pathSeparator)
+            ? ''
+            : Platform.pathSeparator;
+        final file = File('${directory.path}$separator$fileName');
+        await file.writeAsString(content, flush: true);
+        return;
+      } catch (_) {
+        // Coba lokasi berikutnya.
+      }
+    }
+  }
+
+  String _twoDigits(int value) => value.toString().padLeft(2, '0');
+
+  String _formatDateTime(DateTime value) {
+    return '${_twoDigits(value.day)}/${_twoDigits(value.month)}/${value.year} '
+        '${_twoDigits(value.hour)}:${_twoDigits(value.minute)}:${_twoDigits(value.second)}';
+  }
+
   String _activeCameraLabel() {
     if (_cameras.isEmpty) return 'Kamera';
     final direction = _cameras[_cameraIndex].lensDirection;
@@ -304,12 +448,17 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
   Widget build(BuildContext context) {
     final controller = _cameraController;
     final isReady = controller != null && controller.value.isInitialized;
+    final mirrorOverlay = controller?.description.lensDirection ==
+        CameraLensDirection.front;
 
     return Scaffold(
       backgroundColor: Colors.black,
       body: SafeArea(
-        child: Stack(
-          children: [
+        child: LayoutBuilder(
+          builder: (context, constraints) {
+            _scannerCanvasSize = constraints.biggest;
+            return Stack(
+              children: [
             Positioned.fill(
               child: isReady
                   ? FittedBox(
@@ -328,6 +477,7 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
                   painter: _ScannerOverlayPainter(
                     faces: _recognizedFaces,
                     frameSize: _lastFrameSize,
+                    mirrorHorizontally: mirrorOverlay,
                   ),
                 ),
               ),
@@ -426,7 +576,9 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
                 ),
               ),
             ),
-          ],
+              ],
+            );
+          },
         ),
       ),
     );
@@ -434,10 +586,15 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
 }
 
 class _ScannerOverlayPainter extends CustomPainter {
-  const _ScannerOverlayPainter({required this.faces, required this.frameSize});
+  const _ScannerOverlayPainter({
+    required this.faces,
+    required this.frameSize,
+    required this.mirrorHorizontally,
+  });
 
   final List<AiRecognizedFaceBox> faces;
   final Size? frameSize;
+  final bool mirrorHorizontally;
 
   @override
   void paint(Canvas canvas, Size size) {
@@ -526,8 +683,11 @@ class _ScannerOverlayPainter extends CustomPainter {
     final drawnHeight = frame.height * scale;
     final offsetX = (canvasSize.width - drawnWidth) / 2;
     final offsetY = (canvasSize.height - drawnHeight) / 2;
+    final left = mirrorHorizontally
+        ? frame.width - face.left - face.width
+        : face.left;
     return Rect.fromLTWH(
-      offsetX + face.left * scale,
+      offsetX + left * scale,
       offsetY + face.top * scale,
       face.width * scale,
       face.height * scale,
@@ -536,7 +696,9 @@ class _ScannerOverlayPainter extends CustomPainter {
 
   @override
   bool shouldRepaint(covariant _ScannerOverlayPainter oldDelegate) {
-    return oldDelegate.faces != faces || oldDelegate.frameSize != frameSize;
+    return oldDelegate.faces != faces ||
+        oldDelegate.frameSize != frameSize ||
+        oldDelegate.mirrorHorizontally != mirrorHorizontally;
   }
 }
 

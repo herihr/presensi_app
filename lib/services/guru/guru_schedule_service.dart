@@ -1,5 +1,8 @@
 part of '../../pages/guru/guru_page.dart';
 
+// Mode testing: set ke false untuk kembali menampilkan jadwal sesuai hari ini.
+const bool _showAllGuruSchedulesForTesting = false;
+
 Future<List<_GuruSchedule>> _loadGuruSchedules(User user) async {
   final api = ApiService();
   try {
@@ -38,6 +41,10 @@ Future<List<_GuruSchedule>> _loadGuruSchedules(User user) async {
         .where((item) => item.id != 0 && item.kelasId != 0)
         .toList()
       ..sort((a, b) => a.timeRange.compareTo(b.timeRange));
+
+    if (_showAllGuruSchedulesForTesting) {
+      return schedules;
+    }
 
     final todayName = _indonesianDayName(DateTime.now());
     return schedules

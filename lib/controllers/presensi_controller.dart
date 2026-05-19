@@ -1,6 +1,6 @@
-import '../ai/face_detector.dart';
-import '../ai/face_embedder.dart';
-import '../ai/similarity_service.dart';
+import '../ai/realtime/realtime_similarity_service.dart';
+import '../ai/shared/face_embedder.dart';
+import '../ai/static_face/face_detector.dart';
 import '../services/presensi_service.dart';
 
 class PresensiController {

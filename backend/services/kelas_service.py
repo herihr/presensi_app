@@ -1,6 +1,8 @@
 from sqlalchemy.orm import Session
 from models.guru import Guru
 from models.kelas import Kelas
+from models.wali_kelas import WaliKelas
+from services.tahun_pelajaran_service import TahunPelajaranService
 
 
 class KelasService:
@@ -16,6 +18,14 @@ class KelasService:
                 wali_kelas_id=data.wali_kelas_id,
             )
             db.add(kelas)
+            db.flush()
+            if data.wali_kelas_id:
+                KelasService._upsert_wali_kelas_tahunan(
+                    db,
+                    guru_id=data.wali_kelas_id,
+                    kelas_id=kelas.id,
+                    tahun_pelajaran_id=TahunPelajaranService.get_active(db).id,
+                )
             db.commit()
             db.refresh(kelas)
             return kelas
@@ -60,6 +70,13 @@ class KelasService:
                     exclude_kelas_id=kelas_id,
                 )
                 kelas.wali_kelas_id = data.wali_kelas_id
+                if data.wali_kelas_id:
+                    KelasService._upsert_wali_kelas_tahunan(
+                        db,
+                        guru_id=data.wali_kelas_id,
+                        kelas_id=kelas.id,
+                        tahun_pelajaran_id=TahunPelajaranService.get_active(db).id,
+                    )
 
             db.commit()
             db.refresh(kelas)
@@ -97,3 +114,22 @@ class KelasService:
 
         if query.first():
             raise ValueError("Guru ini sudah menjadi wali kelas lain")
+
+    @staticmethod
+    def _upsert_wali_kelas_tahunan(
+        db: Session,
+        guru_id: int,
+        kelas_id: int,
+        tahun_pelajaran_id: int,
+    ):
+        db.query(WaliKelas).filter(
+            WaliKelas.kelas_id == kelas_id,
+            WaliKelas.tahun_pelajaran_id == tahun_pelajaran_id,
+        ).delete(synchronize_session=False)
+        db.add(
+            WaliKelas(
+                guru_id=guru_id,
+                kelas_id=kelas_id,
+                tahun_pelajaran_id=tahun_pelajaran_id,
+            )
+        )

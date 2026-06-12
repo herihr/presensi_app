@@ -5,6 +5,7 @@ import 'package:flutter/services.dart';
 import 'package:image/image.dart' as img;
 import 'package:image_picker/image_picker.dart';
 
+import '../../ai/debug/embedding_artifact_recorder.dart';
 import '../../ai/shared/face_embedder.dart';
 import '../../ai/static_face/face_detector.dart';
 import '../../services/api_service.dart';
@@ -42,9 +43,7 @@ class _AdminSiswaViewState extends State<AdminSiswaView> {
 
   Future<void> _openForm({_SiswaItem? siswa}) async {
     final changed = await Navigator.of(context).push<bool>(
-      MaterialPageRoute(
-        builder: (_) => TambahSiswaPage(siswa: siswa),
-      ),
+      MaterialPageRoute(builder: (_) => TambahSiswaPage(siswa: siswa)),
     );
 
     if (changed == true && mounted) {
@@ -111,16 +110,16 @@ class _AdminSiswaViewState extends State<AdminSiswaView> {
               Text(
                 'Data Siswa',
                 style: Theme.of(context).textTheme.headlineMedium?.copyWith(
-                      fontWeight: FontWeight.w700,
-                      color: const Color(0xFF191B23),
-                    ),
+                  fontWeight: FontWeight.w700,
+                  color: const Color(0xFF191B23),
+                ),
               ),
               const SizedBox(height: 8),
               Text(
                 'Kelola identitas, kelas, dan data wajah siswa',
-                style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF434655),
-                    ),
+                style: Theme.of(
+                  context,
+                ).textTheme.bodySmall?.copyWith(color: const Color(0xFF434655)),
               ),
               const SizedBox(height: 24),
               SizedBox(
@@ -158,9 +157,10 @@ class _AdminSiswaViewState extends State<AdminSiswaView> {
                       child: _EmptyState(
                         icon: Icons.cloud_off_rounded,
                         title: 'Data siswa belum bisa dimuat',
-                        description: snapshot.error
-                            .toString()
-                            .replaceFirst('Exception: ', ''),
+                        description: snapshot.error.toString().replaceFirst(
+                          'Exception: ',
+                          '',
+                        ),
                       ),
                     );
                   }
@@ -205,10 +205,7 @@ class _AdminSiswaViewState extends State<AdminSiswaView> {
 }
 
 class TambahSiswaPage extends StatefulWidget {
-  const TambahSiswaPage({
-    super.key,
-    this.siswa,
-  });
+  const TambahSiswaPage({super.key, this.siswa});
 
   final _SiswaItem? siswa;
 
@@ -234,6 +231,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
   final List<String> _embeddingPhotoPaths = [];
   int? _selectedKelasId;
   String _currentEmbeddingStatus = 'belum_diproses';
+  String? _embeddingArtifactFolder;
   List<_OptionItem> _kelasOptions = const [];
 
   bool get _isEditMode => widget.siswa != null;
@@ -359,11 +357,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
 
   void _showError(String message) {
     if (!mounted) return;
-    AppAlert.error(
-      context,
-      title: 'Terjadi Kesalahan',
-      message: message,
-    );
+    AppAlert.error(context, title: 'Terjadi Kesalahan', message: message);
   }
 
   Future<void> _submit() async {
@@ -392,9 +386,8 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
         response = await _api.post('/api/siswa/', payload);
       }
 
-      final siswaId = _intFromJson(
-            response is Map ? response['id'] : null,
-          ) ??
+      final siswaId =
+          _intFromJson(response is Map ? response['id'] : null) ??
           widget.siswa?.id;
       final embeddingProcessed = await _processAndUploadEmbedding(siswaId);
 
@@ -402,11 +395,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
       await AppAlert.success(
         context,
         title: 'Berhasil',
-        message: embeddingProcessed
-            ? 'Data siswa dan embedding berhasil disimpan.'
-            : _isEditMode
-                ? 'Data siswa berhasil diperbarui.'
-                : 'Data siswa berhasil ditambahkan.',
+        message: _successMessage(embeddingProcessed),
       );
       Navigator.of(context).pop(true);
     } catch (error) {
@@ -423,6 +412,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
 
     var successCount = 0;
     final failedPhotos = <String>[];
+    _embeddingArtifactFolder = null;
 
     try {
       for (final fotoPath in _embeddingPhotoPaths) {
@@ -446,9 +436,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
           'Tidak ada foto embedding yang berhasil dideteksi wajahnya',
         );
       }
-      await _api.put('/api/siswa/$siswaId', {
-        'embedding_status': 'diproses',
-      });
+      await _api.put('/api/siswa/$siswaId', {'embedding_status': 'diproses'});
       if (failedPhotos.isNotEmpty) {
         debugPrint(
           'Embedding tersimpan dari $successCount foto. ${failedPhotos.length} foto dilewati karena wajah tidak terdeteksi.',
@@ -456,9 +444,7 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
       }
       return true;
     } catch (error) {
-      await _api.put('/api/siswa/$siswaId', {
-        'embedding_status': 'gagal',
-      });
+      await _api.put('/api/siswa/$siswaId', {'embedding_status': 'gagal'});
       throw Exception('Data siswa tersimpan, tetapi embedding gagal: $error');
     }
   }
@@ -470,8 +456,9 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
       throw Exception('Foto embedding tidak bisa dibaca');
     }
 
+    final orientedImage = img.bakeOrientation(decoded);
     await _faceDetector.load();
-    final faces = await _faceDetector.detectImage(img.bakeOrientation(decoded));
+    final faces = await _faceDetector.detectImage(orientedImage);
     if (faces.isEmpty) {
       throw Exception(
         'Tidak ada wajah terdeteksi pada salah satu foto embedding',
@@ -483,7 +470,38 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
       final itemArea = item.width * item.height;
       return itemArea > bestArea ? item : best;
     });
-    return _faceEmbedder.embedImage(bestFace.croppedFace);
+    final embedding = await _faceEmbedder.embedImage(bestFace.croppedFace);
+
+    if (EmbeddingArtifactRecorder.canSave) {
+      try {
+        final faceNetInput = await _faceEmbedder.prepareInputImage(
+          bestFace.croppedFace,
+        );
+        _embeddingArtifactFolder = await EmbeddingArtifactRecorder.saveOnce(
+          originalImage: orientedImage,
+          detectedFaces: faces,
+          selectedFace: bestFace,
+          faceNetInput: faceNetInput,
+          embedding: embedding,
+        );
+      } catch (error) {
+        debugPrint('Artefak pengujian embedding gagal disimpan: $error');
+      }
+    }
+
+    return embedding;
+  }
+
+  String _successMessage(bool embeddingProcessed) {
+    final baseMessage = embeddingProcessed
+        ? 'Data siswa dan embedding berhasil disimpan.'
+        : _isEditMode
+        ? 'Data siswa berhasil diperbarui.'
+        : 'Data siswa berhasil ditambahkan.';
+    final artifactFolder = _embeddingArtifactFolder;
+    if (artifactFolder == null) return baseMessage;
+    return '$baseMessage\n\nArtefak pengujian satu kali disimpan di:\n'
+        '$artifactFolder';
   }
 
   String _initialEmbeddingStatus() {
@@ -494,9 +512,8 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
 
   @override
   Widget build(BuildContext context) {
-    final kelasDropdownValue = _kelasOptions.any(
-      (item) => item.id == _selectedKelasId,
-    )
+    final kelasDropdownValue =
+        _kelasOptions.any((item) => item.id == _selectedKelasId)
         ? _selectedKelasId
         : null;
 
@@ -636,8 +653,8 @@ class _TambahSiswaPageState extends State<TambahSiswaPage> {
                       _isLoading
                           ? 'Menyimpan'
                           : _isEditMode
-                              ? 'Simpan Perubahan'
-                              : 'Simpan Siswa',
+                          ? 'Simpan Perubahan'
+                          : 'Simpan Siswa',
                     ),
                     style: FilledButton.styleFrom(
                       backgroundColor: const Color(0xFF2563EB),
@@ -713,9 +730,9 @@ class _PhotoPreview extends StatelessWidget {
           Text(
             'Foto Profil Siswa',
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: const Color(0xFF191B23),
-                ),
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFF191B23),
+            ),
           ),
           const SizedBox(height: 4),
           Text(
@@ -723,9 +740,9 @@ class _PhotoPreview extends StatelessWidget {
                 ? 'Pilih foto dari galeri HP'
                 : 'Foto profil lokal sudah dipilih',
             textAlign: TextAlign.center,
-            style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                  color: const Color(0xFF737686),
-                ),
+            style: Theme.of(
+              context,
+            ).textTheme.bodySmall?.copyWith(color: const Color(0xFF737686)),
           ),
           const SizedBox(height: 16),
           Row(
@@ -760,10 +777,7 @@ class _PhotoPreview extends StatelessWidget {
 }
 
 class _SectionCard extends StatelessWidget {
-  const _SectionCard({
-    required this.title,
-    required this.children,
-  });
+  const _SectionCard({required this.title, required this.children});
 
   final String title;
   final List<Widget> children;
@@ -784,9 +798,9 @@ class _SectionCard extends StatelessWidget {
           Text(
             title,
             style: Theme.of(context).textTheme.titleMedium?.copyWith(
-                  fontWeight: FontWeight.w700,
-                  color: const Color(0xFF191B23),
-                ),
+              fontWeight: FontWeight.w700,
+              color: const Color(0xFF191B23),
+            ),
           ),
           const SizedBox(height: 16),
           ...children,
@@ -797,9 +811,7 @@ class _SectionCard extends StatelessWidget {
 }
 
 class _EmbeddingStatusInfo extends StatelessWidget {
-  const _EmbeddingStatusInfo({
-    required this.status,
-  });
+  const _EmbeddingStatusInfo({required this.status});
 
   final String status;
 
@@ -827,16 +839,16 @@ class _EmbeddingStatusInfo extends StatelessWidget {
                 Text(
                   'Status Embedding',
                   style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                        color: const Color(0xFF737686),
-                      ),
+                    color: const Color(0xFF737686),
+                  ),
                 ),
                 const SizedBox(height: 3),
                 Text(
                   _embeddingLabel(status),
                   style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                        fontWeight: FontWeight.w800,
-                        color: const Color(0xFF191B23),
-                      ),
+                    fontWeight: FontWeight.w800,
+                    color: const Color(0xFF191B23),
+                  ),
                 ),
               ],
             ),
@@ -884,10 +896,7 @@ class _EmbeddingPhotosPicker extends StatelessWidget {
         children: [
           Row(
             children: [
-              const Icon(
-                Icons.photo_library_rounded,
-                color: Color(0xFF737686),
-              ),
+              const Icon(Icons.photo_library_rounded, color: Color(0xFF737686)),
               const SizedBox(width: 12),
               Expanded(
                 child: Column(
@@ -896,23 +905,26 @@ class _EmbeddingPhotosPicker extends StatelessWidget {
                     Text(
                       'Foto untuk Embedding',
                       style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                            fontWeight: FontWeight.w700,
-                            color: const Color(0xFF191B23),
-                          ),
+                        fontWeight: FontWeight.w700,
+                        color: const Color(0xFF191B23),
+                      ),
                     ),
                     const SizedBox(height: 3),
                     Text(
                       'Pilih beberapa foto wajah siswa untuk data pengenalan',
                       style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                            color: const Color(0xFF737686),
-                          ),
+                        color: const Color(0xFF737686),
+                      ),
                     ),
                   ],
                 ),
               ),
               if (photoPaths.isNotEmpty)
                 Container(
-                  padding: const EdgeInsets.symmetric(horizontal: 10, vertical: 5),
+                  padding: const EdgeInsets.symmetric(
+                    horizontal: 10,
+                    vertical: 5,
+                  ),
                   decoration: BoxDecoration(
                     color: const Color(0xFFEFF6FF),
                     borderRadius: BorderRadius.circular(999),
@@ -920,9 +932,9 @@ class _EmbeddingPhotosPicker extends StatelessWidget {
                   child: Text(
                     '${photoPaths.length} foto',
                     style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                          color: const Color(0xFF2563EB),
-                          fontWeight: FontWeight.w700,
-                        ),
+                      color: const Color(0xFF2563EB),
+                      fontWeight: FontWeight.w700,
+                    ),
                   ),
                 ),
             ],
@@ -939,16 +951,18 @@ class _EmbeddingPhotosPicker extends StatelessWidget {
                       child: CircularProgressIndicator(strokeWidth: 2),
                     )
                   : const Icon(Icons.add_photo_alternate_rounded),
-              label: Text(isPicking ? 'Membuka Galeri' : 'Tambah Foto Embedding'),
+              label: Text(
+                isPicking ? 'Membuka Galeri' : 'Tambah Foto Embedding',
+              ),
             ),
           ),
           if (photoPaths.isEmpty) ...[
             const SizedBox(height: 10),
             Text(
               'Belum ada foto embedding yang dipilih',
-              style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                    color: const Color(0xFF737686),
-                  ),
+              style: Theme.of(
+                context,
+              ).textTheme.bodySmall?.copyWith(color: const Color(0xFF737686)),
             ),
           ] else ...[
             const SizedBox(height: 14),
@@ -968,10 +982,7 @@ class _EmbeddingPhotosPicker extends StatelessWidget {
                   children: [
                     ClipRRect(
                       borderRadius: BorderRadius.circular(10),
-                      child: Image.file(
-                        File(path),
-                        fit: BoxFit.cover,
-                      ),
+                      child: Image.file(File(path), fit: BoxFit.cover),
                     ),
                     Positioned(
                       top: 4,
@@ -1060,16 +1071,11 @@ InputDecoration _inputDecoration({
     ),
     enabledBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(14),
-      borderSide: BorderSide(
-        color: const Color(0xFFC3C6D7).withOpacity(0.45),
-      ),
+      borderSide: BorderSide(color: const Color(0xFFC3C6D7).withOpacity(0.45)),
     ),
     focusedBorder: OutlineInputBorder(
       borderRadius: BorderRadius.circular(14),
-      borderSide: const BorderSide(
-        color: Color(0xFF2563EB),
-        width: 1.4,
-      ),
+      borderSide: const BorderSide(color: Color(0xFF2563EB), width: 1.4),
     ),
   );
 }
@@ -1125,17 +1131,17 @@ class _EmptyState extends StatelessWidget {
         const SizedBox(height: 12),
         Text(
           title,
-          style: Theme.of(context).textTheme.bodyMedium?.copyWith(
-                fontWeight: FontWeight.w700,
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.bodyMedium?.copyWith(fontWeight: FontWeight.w700),
           textAlign: TextAlign.center,
         ),
         const SizedBox(height: 6),
         Text(
           description,
-          style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                color: const Color(0xFF737686),
-              ),
+          style: Theme.of(
+            context,
+          ).textTheme.bodySmall?.copyWith(color: const Color(0xFF737686)),
           textAlign: TextAlign.center,
         ),
       ],
@@ -1225,22 +1231,22 @@ class _SiswaCardState extends State<_SiswaCard> {
                             siswa.nama,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style:
-                                Theme.of(context).textTheme.titleSmall?.copyWith(
-                                      fontWeight: FontWeight.w800,
-                                      color: const Color(0xFF191B23),
-                                    ),
+                            style: Theme.of(context).textTheme.titleSmall
+                                ?.copyWith(
+                                  fontWeight: FontWeight.w800,
+                                  color: const Color(0xFF191B23),
+                                ),
                           ),
                           const SizedBox(height: 4),
                           Text(
                             widget.kelasName,
                             maxLines: 1,
                             overflow: TextOverflow.ellipsis,
-                            style:
-                                Theme.of(context).textTheme.bodySmall?.copyWith(
-                                      color: const Color(0xFF737686),
-                                      fontWeight: FontWeight.w500,
-                                    ),
+                            style: Theme.of(context).textTheme.bodySmall
+                                ?.copyWith(
+                                  color: const Color(0xFF737686),
+                                  fontWeight: FontWeight.w500,
+                                ),
                           ),
                           const SizedBox(height: 7),
                           Wrap(
@@ -1325,11 +1331,7 @@ class _SiswaCardState extends State<_SiswaCard> {
 }
 
 class _TinyMeta extends StatelessWidget {
-  const _TinyMeta({
-    required this.icon,
-    required this.label,
-    this.maxWidth,
-  });
+  const _TinyMeta({required this.icon, required this.label, this.maxWidth});
 
   final IconData icon;
   final String label;
@@ -1356,9 +1358,9 @@ class _TinyMeta extends StatelessWidget {
                 maxLines: 1,
                 overflow: TextOverflow.ellipsis,
                 style: Theme.of(context).textTheme.labelSmall?.copyWith(
-                      color: const Color(0xFF64748B),
-                      fontWeight: FontWeight.w700,
-                    ),
+                  color: const Color(0xFF64748B),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
             ),
           ],
@@ -1403,10 +1405,7 @@ class _MinimalIconButton extends StatelessWidget {
 }
 
 class _SiswaDetails extends StatelessWidget {
-  const _SiswaDetails({
-    required this.siswa,
-    required this.kelasName,
-  });
+  const _SiswaDetails({required this.siswa, required this.kelasName});
 
   final _SiswaItem siswa;
   final String kelasName;
@@ -1490,18 +1489,18 @@ class _DetailLine extends StatelessWidget {
               Text(
                 title,
                 style: Theme.of(context).textTheme.labelMedium?.copyWith(
-                      color: const Color(0xFF64748B),
-                      fontWeight: FontWeight.w700,
-                    ),
+                  color: const Color(0xFF64748B),
+                  fontWeight: FontWeight.w700,
+                ),
               ),
               const SizedBox(height: 4),
               Text(
                 value,
                 style: Theme.of(context).textTheme.bodySmall?.copyWith(
-                      color: const Color(0xFF1E293B),
-                      fontWeight: FontWeight.w700,
-                      height: 1.35,
-                    ),
+                  color: const Color(0xFF1E293B),
+                  fontWeight: FontWeight.w700,
+                  height: 1.35,
+                ),
               ),
             ],
           ),
@@ -1547,10 +1546,7 @@ class _SiswaItem {
 }
 
 class _SiswaListData {
-  const _SiswaListData({
-    required this.siswa,
-    required this.kelasById,
-  });
+  const _SiswaListData({required this.siswa, required this.kelasById});
 
   final List<_SiswaItem> siswa;
   final Map<int, String> kelasById;
@@ -1573,10 +1569,7 @@ class _SiswaListData {
 }
 
 class _OptionItem {
-  const _OptionItem({
-    required this.id,
-    required this.label,
-  });
+  const _OptionItem({required this.id, required this.label});
 
   final int id;
   final String label;

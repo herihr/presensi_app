@@ -13,7 +13,9 @@ class Kelas(Base):
     # Relationships
     # 1 kelas hanya 1 wali kelas saja
     wali_kelas = relationship("Guru", back_populates="kelas_yang_diwalikan")
+    wali_kelas_tahunan = relationship("WaliKelas", back_populates="kelas")
     # 1 kelas berisi banyak siswa
     siswa = relationship("Siswa", back_populates="kelas")
+    siswa_tahunan = relationship("SiswaKelas", back_populates="kelas")
     # 1 kelas punya banyak mata pelajaran (melalui jadwal)
     jadwal = relationship("Jadwal", back_populates="kelas")

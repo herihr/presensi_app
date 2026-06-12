@@ -2,6 +2,8 @@ import json
 from sqlalchemy.orm import Session
 from models.embedding import Embedding
 from models.siswa import Siswa
+from models.siswa_kelas import SiswaKelas
+from services.tahun_pelajaran_service import TahunPelajaranService
 
 
 class EmbeddingService:
@@ -54,6 +56,43 @@ class EmbeddingService:
     @staticmethod
     def get_embedding_by_siswa(db: Session, siswa_id: int):
         return db.query(Embedding).filter(Embedding.siswa_id == siswa_id).all()
+
+    # Ambil embedding hanya milik siswa aktif dalam kelas pada tahun pelajaran.
+    @staticmethod
+    def get_embedding_by_kelas(
+        db: Session,
+        kelas_id: int,
+        tahun_pelajaran_id: int | None = None,
+    ):
+        tahun_id = tahun_pelajaran_id or TahunPelajaranService.get_active(db).id
+        siswa_ids = [
+            siswa_id
+            for (siswa_id,) in (
+                db.query(SiswaKelas.siswa_id)
+                .filter(
+                    SiswaKelas.kelas_id == kelas_id,
+                    SiswaKelas.tahun_pelajaran_id == tahun_id,
+                    SiswaKelas.status == "aktif",
+                )
+                .all()
+            )
+        ]
+        if siswa_ids:
+            return (
+                db.query(Embedding)
+                .filter(Embedding.siswa_id.in_(siswa_ids))
+                .all()
+            )
+
+        # Kompatibilitas data lama yang belum tercatat pada siswa_kelas.
+        return (
+            db.query(Embedding)
+            .join(Siswa, Siswa.id == Embedding.siswa_id)
+            .filter(
+                Siswa.kelas_id == kelas_id,
+            )
+            .all()
+        )
 
     # 🔹 GET EMBEDDING BY SISWA (single)
     @staticmethod

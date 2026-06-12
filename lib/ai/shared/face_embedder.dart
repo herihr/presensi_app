@@ -1,6 +1,5 @@
 import 'dart:io';
 import 'dart:math';
-import 'dart:typed_data';
 
 import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
@@ -9,10 +8,8 @@ import 'package:tflite_flutter/tflite_flutter.dart';
 class FaceEmbedder {
   static const modelPath = 'lib/assets/mobilefacenet.tflite';
 
-  FaceEmbedder({
-    Uint8List? modelBytes,
-    this.logModelInfo = true,
-  }) : _modelBytes = modelBytes;
+  FaceEmbedder({Uint8List? modelBytes, this.logModelInfo = true})
+    : _modelBytes = modelBytes;
 
   final Uint8List? _modelBytes;
   final bool logModelInfo;
@@ -71,6 +68,15 @@ class FaceEmbedder {
     interpreter.run(input, output);
 
     return _l2Normalize(_flattenDoubles(output));
+  }
+
+  Future<img.Image> prepareInputImage(img.Image image) async {
+    final interpreter = await _loadInterpreter();
+    final inputShape = interpreter.getInputTensor(0).shape;
+    if (inputShape.length != 4) {
+      throw StateError('Input model MobileFaceNet tidak valid: $inputShape');
+    }
+    return img.copyResize(image, width: inputShape[2], height: inputShape[1]);
   }
 
   Future<Interpreter> _loadInterpreter() async {
@@ -135,9 +141,7 @@ class FaceEmbedder {
   }
 
   List<double> _l2Normalize(List<double> vector) {
-    final norm = sqrt(
-      vector.fold<double>(0, (sum, item) => sum + item * item),
-    );
+    final norm = sqrt(vector.fold<double>(0, (sum, item) => sum + item * item));
 
     if (norm == 0) return vector;
     return vector.map((item) => item / norm).toList();

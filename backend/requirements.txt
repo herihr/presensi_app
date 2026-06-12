@@ -5,3 +5,8 @@ pymysql
 bcrypt
 python-jose[cryptography]
 pydantic[email]
+python-multipart
+numpy
+pillow
+ai-edge-litert
+tflite-runtime; platform_system == "Linux"

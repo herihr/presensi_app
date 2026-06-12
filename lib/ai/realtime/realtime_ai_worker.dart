@@ -5,21 +5,23 @@ import 'package:flutter/foundation.dart';
 import 'package:image/image.dart' as img;
 
 import '../shared/ai_models.dart';
+import '../shared/face_detection_models.dart';
 import '../shared/face_embedder.dart';
-import '../shared/yolo_face_detector.dart';
+import '../shared/server_yolo_detector.dart';
 import 'camera_frame_converter.dart';
 import 'realtime_ai_config.dart';
-import 'realtime_face_detector.dart';
 import 'realtime_similarity_service.dart';
 
 Future<void> realtimeAiWorkerEntry(Map<String, dynamic> config) async {
   final mainPort = config['sendPort'] as SendPort;
   final receivePort = ReceivePort();
-  final yoloModelBytes =
-      (config['yoloModel'] as TransferableTypedData).materialize().asUint8List();
   final faceModelBytes =
       (config['faceModel'] as TransferableTypedData).materialize().asUint8List();
-  final detector = RealtimeFaceDetector(modelBytes: yoloModelBytes);
+  const detector = ServerYoloDetector(
+    confidenceThreshold: 0.50,
+    iouThreshold: 0.50,
+    faceCropPaddingRatio: 0.25,
+  );
   final embedder = FaceEmbedder(
     modelBytes: faceModelBytes,
     logModelInfo: !RealtimeAiConfig.enableTimingLogs,
@@ -95,9 +97,11 @@ Future<void> realtimeAiWorkerEntry(Map<String, dynamic> config) async {
           scanFrame.top,
         );
         yoloWatch.stop();
-        final yoloTiming = detector.lastTimingProfile;
-        if (RealtimeAiConfig.enableTimingLogs && yoloTiming != null) {
-          timingLines.add(yoloTiming.toReportLine());
+        if (RealtimeAiConfig.enableTimingLogs) {
+          timingLines.add(
+            '[YOLO server] networkAndDetect=${yoloWatch.elapsedMilliseconds}ms, '
+            'boxes=${candidateDetections.length}',
+          );
         }
 
         final recognizeWatch = Stopwatch()..start();

@@ -40,47 +40,52 @@ def create_jadwal_batch(
 
 @router.get("/", response_model=list[JadwalResponse])
 def get_all_jadwal(
+    tahun_pelajaran_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    return JadwalService.get_all_jadwal(db)
+    return JadwalService.get_all_jadwal(db, tahun_pelajaran_id)
 
 
 @router.get("/kelas/{kelas_id}", response_model=list[JadwalResponse])
 def get_jadwal_by_kelas(
     kelas_id: int,
+    tahun_pelajaran_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    return JadwalService.get_jadwal_by_kelas(db, kelas_id)
+    return JadwalService.get_jadwal_by_kelas(db, kelas_id, tahun_pelajaran_id)
 
 
 @router.get("/guru/{guru_id}", response_model=list[JadwalResponse])
 def get_jadwal_by_guru(
     guru_id: int,
+    tahun_pelajaran_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    return JadwalService.get_jadwal_by_guru(db, guru_id)
+    return JadwalService.get_jadwal_by_guru(db, guru_id, tahun_pelajaran_id)
 
 
 @router.get("/mapel/{mapel_id}", response_model=list[JadwalResponse])
 def get_jadwal_by_mapel(
     mapel_id: int,
+    tahun_pelajaran_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    return JadwalService.get_jadwal_by_mapel(db, mapel_id)
+    return JadwalService.get_jadwal_by_mapel(db, mapel_id, tahun_pelajaran_id)
 
 
 @router.get("/hari/{kelas_id}/{hari}", response_model=list[JadwalResponse])
 def get_jadwal_by_hari(
     kelas_id: int,
     hari: str,
+    tahun_pelajaran_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    return JadwalService.get_jadwal_by_hari(db, kelas_id, hari)
+    return JadwalService.get_jadwal_by_hari(db, kelas_id, hari, tahun_pelajaran_id)
 
 
 @router.get("/{jadwal_id}", response_model=JadwalResponse)

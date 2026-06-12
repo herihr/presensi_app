@@ -33,6 +33,7 @@ class Guru(Base):
     # Relationships
     # 1 guru dapat menjadi wali untuk lebih dari 1 kelas
     kelas_yang_diwalikan = relationship("Kelas", back_populates="wali_kelas")
+    wali_kelas_tahunan = relationship("WaliKelas", back_populates="guru")
     # 1 guru dapat mengajar lebih dari 1 mata pelajaran
     mapel_yang_diajar = relationship("GuruMapel", back_populates="guru")
     jadwal = relationship("Jadwal", back_populates="guru")

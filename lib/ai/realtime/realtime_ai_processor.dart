@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:isolate';
-import 'dart:typed_data';
 import 'dart:ui' as ui;
 
 import 'package:camera/camera.dart';
@@ -11,7 +10,6 @@ import '../shared/ai_models.dart';
 import '../shared/face_embedder.dart';
 import 'realtime_ai_config.dart';
 import 'realtime_ai_worker.dart';
-import 'realtime_face_detector.dart';
 
 class RealtimeAiProcessor {
   RealtimeAiProcessor({this.onTimingLog});
@@ -32,12 +30,9 @@ class RealtimeAiProcessor {
   bool _isBusy = false;
   DateTime _lastAcceptedAt = DateTime.fromMillisecondsSinceEpoch(0);
 
-  Future<void> start({
-    required List<AiKnownFace> knownFaces,
-  }) async {
+  Future<void> start({required List<AiKnownFace> knownFaces}) async {
     if (_workerPort != null) return;
 
-    final yoloModelBytes = await _loadAssetBytes(RealtimeFaceDetector.modelPath);
     final faceModelBytes = await _loadAssetBytes(FaceEmbedder.modelPath);
 
     _receivePort = ReceivePort();
@@ -70,7 +65,6 @@ class RealtimeAiProcessor {
       realtimeAiWorkerEntry,
       {
         'sendPort': _receivePort!.sendPort,
-        'yoloModel': TransferableTypedData.fromList([yoloModelBytes]),
         'faceModel': TransferableTypedData.fromList([faceModelBytes]),
         'knownFaces': knownFaces.map((face) => face.toMap()).toList(),
       },
@@ -121,8 +115,9 @@ class RealtimeAiProcessor {
           .map((plane) => TransferableTypedData.fromList([plane.bytes]))
           .toList(),
       'bytesPerRow': image.planes.map((plane) => plane.bytesPerRow).toList(),
-      'bytesPerPixel':
-          image.planes.map((plane) => plane.bytesPerPixel ?? 1).toList(),
+      'bytesPerPixel': image.planes
+          .map((plane) => plane.bytesPerPixel ?? 1)
+          .toList(),
       'scanRegion': scanRegion == null
           ? null
           : {
@@ -166,12 +161,12 @@ class RealtimeAiProcessor {
     }
     final faces = rawFaces is List
         ? rawFaces
-            .map(
-              (item) => AiRecognizedFaceBox.fromMap(
-                Map<String, dynamic>.from(item as Map),
-              ),
-            )
-            .toList()
+              .map(
+                (item) => AiRecognizedFaceBox.fromMap(
+                  Map<String, dynamic>.from(item as Map),
+                ),
+              )
+              .toList()
         : <AiRecognizedFaceBox>[];
     completer.complete(faces);
   }

@@ -73,7 +73,6 @@ flutter:
 
   assets:
     - lib/assets/mobilefacenet.tflite
-    - lib/assets/yolofacedetect.tflite
     - lib/assets/img/logo.png
 
   # To add assets to your application, add an assets section, like this:

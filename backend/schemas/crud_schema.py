@@ -1,4 +1,5 @@
 import json
+from datetime import date
 from typing import Any, Literal, Optional
 
 from pydantic import BaseModel, EmailStr, Field, field_validator, model_validator
@@ -110,6 +111,7 @@ class SiswaCreate(BaseModel):
     alamat: Optional[str] = None
     foto_url: Optional[str] = None
     embedding_status: EmbeddingStatus = "belum_diproses"
+    tahun_pelajaran_id: Optional[int] = None
 
 
 class SiswaUpdate(BaseModel):
@@ -120,6 +122,7 @@ class SiswaUpdate(BaseModel):
     alamat: Optional[str] = None
     foto_url: Optional[str] = None
     embedding_status: Optional[EmbeddingStatus] = None
+    tahun_pelajaran_id: Optional[int] = None
 
 
 class SiswaResponse(BaseModel):
@@ -134,6 +137,55 @@ class SiswaResponse(BaseModel):
 
     class Config:
         from_attributes = True
+
+
+# ============ TAHUN PELAJARAN ============
+
+class TahunPelajaranCreate(BaseModel):
+    nama: str
+    tanggal_mulai: Optional[date] = None
+    tanggal_selesai: Optional[date] = None
+    is_aktif: bool = False
+
+
+class TahunPelajaranUpdate(BaseModel):
+    nama: Optional[str] = None
+    tanggal_mulai: Optional[date] = None
+    tanggal_selesai: Optional[date] = None
+    is_aktif: Optional[bool] = None
+
+
+class TahunPelajaranResponse(BaseModel):
+    id: int
+    nama: str
+    tanggal_mulai: Optional[date] = None
+    tanggal_selesai: Optional[date] = None
+    is_aktif: bool
+
+    class Config:
+        from_attributes = True
+
+
+class SiswaKelasResponse(BaseModel):
+    id: int
+    siswa_id: int
+    kelas_id: int
+    tahun_pelajaran_id: int
+    status: str
+
+    class Config:
+        from_attributes = True
+
+
+class SiswaNaikKelasItem(BaseModel):
+    siswa_id: int
+    kelas_id: int
+    status: str = "aktif"
+
+
+class SiswaNaikKelasRequest(BaseModel):
+    tahun_pelajaran_id: int
+    items: list[SiswaNaikKelasItem] = Field(min_length=1)
 
 
 # ============ KELAS ============
@@ -181,6 +233,7 @@ class JadwalCreate(BaseModel):
     kelas_id: int
     mapel_id: int
     guru_id: int
+    tahun_pelajaran_id: Optional[int] = None
     hari: ValidHari
     jam_mulai: str
     jam_selesai: str
@@ -205,6 +258,7 @@ class JadwalUpdate(BaseModel):
     kelas_id: Optional[int] = None
     mapel_id: Optional[int] = None
     guru_id: Optional[int] = None
+    tahun_pelajaran_id: Optional[int] = None
     hari: Optional[ValidHari] = None
     jam_mulai: Optional[str] = None
     jam_selesai: Optional[str] = None
@@ -222,6 +276,7 @@ class JadwalResponse(BaseModel):
     kelas_id: int
     mapel_id: int
     guru_id: int
+    tahun_pelajaran_id: Optional[int] = None
     hari: str
     jam_mulai: str
     jam_selesai: str

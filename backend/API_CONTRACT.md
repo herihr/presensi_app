@@ -105,7 +105,7 @@ berikutnya.
 | Mata Pelajaran | `/api/mata-pelajaran/` | `/api/mata-pelajaran/{mapel_id}` | - |
 | Jadwal | `/api/jadwal/`, `/api/jadwal/batch` | `/api/jadwal/{jadwal_id}` | `/api/jadwal/kelas/{kelas_id}`, `/api/jadwal/guru/{guru_id}`, `/api/jadwal/mapel/{mapel_id}`, `/api/jadwal/hari/{kelas_id}/{hari}` |
 | Presensi | `/api/presensi/` | `/api/presensi/{presensi_id}` | `/api/presensi/siswa/{siswa_id}`, `/api/presensi/jadwal/{jadwal_id}`, `/api/presensi/guru/{guru_id}`, `/api/presensi/tanggal/{tanggal}` |
-| Embedding | `/api/embedding/` | `/api/embedding/{embedding_id}` | `/api/embedding/siswa/{siswa_id}` |
+| Embedding | `/api/embedding/` | `/api/embedding/{embedding_id}` | `/api/embedding/siswa/{siswa_id}`, `/api/embedding/kelas/{kelas_id}?tahun_pelajaran_id={tahun_id}` |
 | Upload Foto | `/api/uploads/{category}` | - | `category`: `admin`, `guru`, atau `siswa` |
 
 Collection endpoint mendukung:

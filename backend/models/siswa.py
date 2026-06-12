@@ -18,6 +18,7 @@ class Siswa(Base):
     # Relationships
     # 1 siswa hanya ada pada 1 kelas
     kelas = relationship("Kelas", back_populates="siswa")
+    riwayat_kelas = relationship("SiswaKelas", back_populates="siswa")
     # 1 siswa memiliki lebih dari 1 embedding wajah
     embeddings = relationship("Embedding", back_populates="siswa")
     presensi = relationship("Presensi", back_populates="siswa")

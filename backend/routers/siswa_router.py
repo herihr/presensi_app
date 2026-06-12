@@ -5,7 +5,12 @@ from sqlalchemy.orm import Session
 from core.database import get_db
 from dependencies.auth import get_current_user, require_admin
 from services.siswa_service import SiswaService
-from schemas.crud_schema import SiswaCreate, SiswaUpdate, SiswaResponse
+from schemas.crud_schema import (
+    SiswaCreate,
+    SiswaNaikKelasRequest,
+    SiswaResponse,
+    SiswaUpdate,
+)
 
 router = APIRouter(prefix="/siswa", tags=["Siswa"])
 
@@ -35,10 +40,26 @@ def get_all_siswa(
 @router.get("/kelas/{kelas_id}", response_model=list[SiswaResponse])
 def get_siswa_by_kelas(
     kelas_id: int,
+    tahun_pelajaran_id: int | None = None,
     db: Session = Depends(get_db),
     current_user: dict = Depends(get_current_user),
 ):
-    return SiswaService.get_siswa_by_kelas(db, kelas_id)
+    return SiswaService.get_siswa_by_kelas(db, kelas_id, tahun_pelajaran_id)
+
+
+@router.post("/naik-kelas")
+def naik_kelas(
+    data: SiswaNaikKelasRequest,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(require_admin),
+):
+    try:
+        SiswaService.naik_kelas(db, data)
+    except ValueError as exc:
+        raise HTTPException(status_code=400, detail=str(exc))
+    except IntegrityError:
+        raise HTTPException(status_code=400, detail="Data naik kelas tidak valid")
+    return {"message": "Data kenaikan kelas berhasil disimpan"}
 
 
 @router.get("/{siswa_id}", response_model=SiswaResponse)

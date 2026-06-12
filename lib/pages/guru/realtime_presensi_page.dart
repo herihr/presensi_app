@@ -53,6 +53,7 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
   Size? _lastFrameSize;
   Size? _scannerCanvasSize;
   bool _timingReportSaved = false;
+  DateTime _acceptAiFramesAfter = DateTime.fromMillisecondsSinceEpoch(0);
 
   @override
   void initState() {
@@ -114,7 +115,7 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
       final targetName = widget.targetStudentName;
       setState(() {
         _status = targetName == null
-            ? 'Presensi realtime aktif. AI isolate siap. Maksimal 3 frame per detik diproses. ${knownFaces.length} embedding siswa dimuat.'
+            ? 'Presensi realtime aktif. AI isolate siap. Maksimal ${RealtimeAiConfig.targetFps} frame per detik diproses. ${knownFaces.length} embedding siswa dimuat.'
             : 'Pindai wajah $targetName. Arahkan wajah ke kamera sampai dikenali.';
       });
     } catch (error) {
@@ -150,6 +151,9 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
         'Kamera aktif: ${camera.lensDirection.name}, sensorOrientation=${camera.sensorOrientation}',
       );
     }
+    _acceptAiFramesAfter = DateTime.now().add(
+      RealtimeAiConfig.initialCameraWarmupDuration,
+    );
     await controller.startImageStream(_onCameraFrame);
 
     if (!mounted) {
@@ -198,27 +202,35 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
 
   Future<List<AiKnownFace>> _loadKnownFaces() async {
     try {
-      final siswaResponse = await _api.get(
-        '/api/siswa/kelas/${widget.kelasId}',
-      );
       final siswaById = <int, String>{};
-      for (final item in siswaResponse as List) {
-        final siswa = item as Map<String, dynamic>;
-        final id = _intFromJson(siswa['id']);
-        if (id != null) {
-          siswaById[id] = siswa['nama']?.toString() ?? 'Siswa $id';
+
+      final targetStudentId = widget.targetStudentId;
+      late final dynamic embeddingResponse;
+      if (targetStudentId != null) {
+        siswaById[targetStudentId] =
+            widget.targetStudentName ?? 'Siswa $targetStudentId';
+        embeddingResponse = await _api.get(
+          '/api/embedding/siswa/$targetStudentId',
+        );
+      } else {
+        final responses = await Future.wait([
+          _api.get('/api/siswa/kelas/${widget.kelasId}'),
+          _api.get('/api/embedding/kelas/${widget.kelasId}'),
+        ]);
+        for (final item in responses[0] as List) {
+          final siswa = item as Map<String, dynamic>;
+          final id = _intFromJson(siswa['id']);
+          if (id != null) {
+            siswaById[id] = siswa['nama']?.toString() ?? 'Siswa $id';
+          }
         }
+        embeddingResponse = responses[1];
       }
 
-      final embeddingResponse = await _api.get('/api/embedding/');
       final knownFaces = <AiKnownFace>[];
       for (final item in embeddingResponse as List) {
         final embeddingJson = item as Map<String, dynamic>;
         final siswaId = _intFromJson(embeddingJson['siswa_id']);
-        if (widget.targetStudentId != null &&
-            siswaId != widget.targetStudentId) {
-          continue;
-        }
         final name = siswaId == null ? null : siswaById[siswaId];
         final embedding = _embeddingFromJson(embeddingJson['embedding']);
         if (siswaId != null && name != null && embedding.isNotEmpty) {
@@ -237,6 +249,7 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
 
   Future<void> _onCameraFrame(CameraImage image) async {
     if (!mounted) return;
+    if (DateTime.now().isBefore(_acceptAiFramesAfter)) return;
 
     try {
       final rotationDegrees =
@@ -320,15 +333,18 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
     final offsetX = (canvasSize.width - drawnWidth) / 2;
     final offsetY = (canvasSize.height - drawnHeight) / 2;
 
-    final left =
-        ((scanRect.left - offsetX) / scale).clamp(0.0, frame.width).toDouble();
-    final top =
-        ((scanRect.top - offsetY) / scale).clamp(0.0, frame.height).toDouble();
+    final left = ((scanRect.left - offsetX) / scale)
+        .clamp(0.0, frame.width)
+        .toDouble();
+    final top = ((scanRect.top - offsetY) / scale)
+        .clamp(0.0, frame.height)
+        .toDouble();
     final right = ((scanRect.right - offsetX) / scale)
         .clamp(0.0, frame.width)
         .toDouble();
-    final bottom =
-        ((scanRect.bottom - offsetY) / scale).clamp(0.0, frame.height).toDouble();
+    final bottom = ((scanRect.bottom - offsetY) / scale)
+        .clamp(0.0, frame.height)
+        .toDouble();
 
     if (right <= left || bottom <= top) return null;
     return Rect.fromLTRB(left, top, right, bottom);
@@ -375,16 +391,17 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
       'Target FPS proses AI: ${RealtimeAiConfig.targetFps}',
       'Recognition threshold: ${RealtimeAiConfig.recognitionThreshold}',
       'Minimal ukuran wajah dikenali: ${RealtimeAiConfig.minRecognizableFaceSize}px',
-      'Ukuran input YOLO: ${RealtimeAiConfig.yoloInputWidth}x${RealtimeAiConfig.yoloInputHeight}px',
+      'Ukuran input YOLO: mengikuti shape model di backend',
       '',
       'Urutan proses utama:',
       '1. Frame kamera diterima dari image stream.',
       '2. Plane YUV dikonversi menjadi RGB.',
       '3. Frame diputar sesuai orientasi sensor.',
       '4. Frame dicrop sesuai area scan biru.',
-      '5. YOLO melakukan resize, input tensor, inference, decode box, NMS, lalu crop wajah.',
-      '6. FaceNet membuat embedding wajah.',
-      '7. Cosine similarity mencari siswa paling cocok dari embedding database.',
+      '5. Area scan dikirim ke backend untuk YOLO inference dan NMS.',
+      '6. Flutter melakukan crop wajah berdasarkan bounding box dari backend.',
+      '7. FaceNet membuat embedding wajah.',
+      '8. Cosine similarity mencari siswa paling cocok dari embedding database.',
       '',
       'Hasil profiling per frame:',
       ..._timingLogs.expand((log) => [log, '']),
@@ -448,8 +465,8 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
   Widget build(BuildContext context) {
     final controller = _cameraController;
     final isReady = controller != null && controller.value.isInitialized;
-    final mirrorOverlay = controller?.description.lensDirection ==
-        CameraLensDirection.front;
+    final mirrorOverlay =
+        controller?.description.lensDirection == CameraLensDirection.front;
 
     return Scaffold(
       backgroundColor: Colors.black,
@@ -459,123 +476,125 @@ class _RealtimePresensiPageState extends State<RealtimePresensiPage> {
             _scannerCanvasSize = constraints.biggest;
             return Stack(
               children: [
-            Positioned.fill(
-              child: isReady
-                  ? FittedBox(
-                      fit: BoxFit.cover,
-                      child: SizedBox(
-                        width: controller.value.previewSize!.height,
-                        height: controller.value.previewSize!.width,
-                        child: CameraPreview(controller),
+                Positioned.fill(
+                  child: isReady
+                      ? FittedBox(
+                          fit: BoxFit.cover,
+                          child: SizedBox(
+                            width: controller.value.previewSize!.height,
+                            height: controller.value.previewSize!.width,
+                            child: CameraPreview(controller),
+                          ),
+                        )
+                      : const ColoredBox(color: Colors.black),
+                ),
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: CustomPaint(
+                      painter: _ScannerOverlayPainter(
+                        faces: _recognizedFaces,
+                        frameSize: _lastFrameSize,
+                        mirrorHorizontally: mirrorOverlay,
                       ),
-                    )
-                  : const ColoredBox(color: Colors.black),
-            ),
-            Positioned.fill(
-              child: IgnorePointer(
-                child: CustomPaint(
-                  painter: _ScannerOverlayPainter(
-                    faces: _recognizedFaces,
-                    frameSize: _lastFrameSize,
-                    mirrorHorizontally: mirrorOverlay,
+                    ),
                   ),
                 ),
-              ),
-            ),
-            Positioned(
-              left: 16,
-              right: 16,
-              top: 12,
-              child: Row(
-                children: [
-                  IconButton.filledTonal(
-                    onPressed: () => Navigator.of(context).pop(),
-                    icon: const Icon(Icons.arrow_back_rounded),
-                    tooltip: 'Kembali',
+                Positioned(
+                  left: 16,
+                  right: 16,
+                  top: 12,
+                  child: Row(
+                    children: [
+                      IconButton.filledTonal(
+                        onPressed: () => Navigator.of(context).pop(),
+                        icon: const Icon(Icons.arrow_back_rounded),
+                        tooltip: 'Kembali',
+                      ),
+                      const SizedBox(width: 10),
+                      Expanded(
+                        child: Column(
+                          crossAxisAlignment: CrossAxisAlignment.start,
+                          children: [
+                            Text(
+                              widget.targetStudentName ?? widget.mapel,
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: const TextStyle(
+                                color: Colors.white,
+                                fontSize: 20,
+                                fontWeight: FontWeight.w800,
+                              ),
+                            ),
+                            Text(
+                              widget.targetStudentName == null
+                                  ? widget.className
+                                  : '${widget.mapel} • ${widget.className}',
+                              maxLines: 1,
+                              overflow: TextOverflow.ellipsis,
+                              style: TextStyle(
+                                color: Colors.white.withValues(alpha: 0.82),
+                                fontSize: 13,
+                              ),
+                            ),
+                          ],
+                        ),
+                      ),
+                      const SizedBox(width: 10),
+                      IconButton.filledTonal(
+                        onPressed: _cameras.length < 2 || _isInitializing
+                            ? null
+                            : _switchCamera,
+                        icon: const Icon(Icons.cameraswitch_rounded),
+                        tooltip: 'Ganti kamera',
+                      ),
+                    ],
                   ),
-                  const SizedBox(width: 10),
-                  Expanded(
-                    child: Column(
-                      crossAxisAlignment: CrossAxisAlignment.start,
+                ),
+                Positioned(
+                  left: 18,
+                  right: 18,
+                  bottom: 24,
+                  child: Container(
+                    padding: const EdgeInsets.all(18),
+                    decoration: BoxDecoration(
+                      color: Colors.black.withValues(alpha: 0.62),
+                      borderRadius: BorderRadius.circular(18),
+                      border: Border.all(
+                        color: Colors.white.withValues(alpha: 0.16),
+                      ),
+                    ),
+                    child: Row(
                       children: [
-                        Text(
-                          widget.targetStudentName ?? widget.mapel,
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: const TextStyle(
+                        Container(
+                          width: 44,
+                          height: 44,
+                          decoration: const BoxDecoration(
+                            color: Color(0xFF2563EB),
+                            shape: BoxShape.circle,
+                          ),
+                          child: Icon(
+                            _isInitializing
+                                ? Icons.hourglass_top_rounded
+                                : Icons.center_focus_strong_rounded,
                             color: Colors.white,
-                            fontSize: 20,
-                            fontWeight: FontWeight.w800,
                           ),
                         ),
-                        Text(
-                          widget.targetStudentName == null
-                              ? widget.className
-                              : '${widget.mapel} • ${widget.className}',
-                          maxLines: 1,
-                          overflow: TextOverflow.ellipsis,
-                          style: TextStyle(
-                            color: Colors.white.withOpacity(0.82),
-                            fontSize: 13,
+                        const SizedBox(width: 14),
+                        Expanded(
+                          child: Text(
+                            _status,
+                            style: const TextStyle(
+                              color: Colors.white,
+                              fontSize: 14,
+                              height: 1.35,
+                              fontWeight: FontWeight.w600,
+                            ),
                           ),
                         ),
                       ],
                     ),
                   ),
-                  const SizedBox(width: 10),
-                  IconButton.filledTonal(
-                    onPressed: _cameras.length < 2 || _isInitializing
-                        ? null
-                        : _switchCamera,
-                    icon: const Icon(Icons.cameraswitch_rounded),
-                    tooltip: 'Ganti kamera',
-                  ),
-                ],
-              ),
-            ),
-            Positioned(
-              left: 18,
-              right: 18,
-              bottom: 24,
-              child: Container(
-                padding: const EdgeInsets.all(18),
-                decoration: BoxDecoration(
-                  color: Colors.black.withOpacity(0.62),
-                  borderRadius: BorderRadius.circular(18),
-                  border: Border.all(color: Colors.white.withOpacity(0.16)),
                 ),
-                child: Row(
-                  children: [
-                    Container(
-                      width: 44,
-                      height: 44,
-                      decoration: const BoxDecoration(
-                        color: Color(0xFF2563EB),
-                        shape: BoxShape.circle,
-                      ),
-                      child: Icon(
-                        _isInitializing
-                            ? Icons.hourglass_top_rounded
-                            : Icons.center_focus_strong_rounded,
-                        color: Colors.white,
-                      ),
-                    ),
-                    const SizedBox(width: 14),
-                    Expanded(
-                      child: Text(
-                        _status,
-                        style: const TextStyle(
-                          color: Colors.white,
-                          fontSize: 14,
-                          height: 1.35,
-                          fontWeight: FontWeight.w600,
-                        ),
-                      ),
-                    ),
-                  ],
-                ),
-              ),
-            ),
               ],
             );
           },
@@ -606,7 +625,7 @@ class _ScannerOverlayPainter extends CustomPainter {
     );
     final radius = Radius.circular(size.width * 0.08);
 
-    final dimPaint = Paint()..color = Colors.black.withOpacity(0.26);
+    final dimPaint = Paint()..color = Colors.black.withValues(alpha: 0.26);
     final clearPath = Path()
       ..addRect(Offset.zero & size)
       ..addRRect(RRect.fromRectAndRadius(rect, radius))

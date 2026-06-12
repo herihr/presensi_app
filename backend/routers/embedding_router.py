@@ -38,6 +38,20 @@ def get_embedding_by_siswa(
     return EmbeddingService.get_embedding_by_siswa(db, siswa_id)
 
 
+@router.get("/kelas/{kelas_id}", response_model=list[EmbeddingResponse])
+def get_embedding_by_kelas(
+    kelas_id: int,
+    tahun_pelajaran_id: int | None = None,
+    db: Session = Depends(get_db),
+    current_user: dict = Depends(get_current_user),
+):
+    return EmbeddingService.get_embedding_by_kelas(
+        db,
+        kelas_id,
+        tahun_pelajaran_id,
+    )
+
+
 @router.get("/{embedding_id}", response_model=EmbeddingResponse)
 def get_embedding(
     embedding_id: int,

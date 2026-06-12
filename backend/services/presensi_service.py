@@ -4,6 +4,7 @@ from models.guru import Guru
 from models.jadwal import Jadwal
 from models.presensi import Presensi
 from models.siswa import Siswa
+from models.siswa_kelas import SiswaKelas
 
 
 class PresensiService:
@@ -125,7 +126,13 @@ class PresensiService:
         if not db.query(Guru).filter(Guru.id == guru_id).first():
             raise ValueError("Guru tidak ditemukan")
 
-        if siswa.kelas_id != jadwal.kelas_id:
+        siswa_di_kelas_jadwal = db.query(SiswaKelas).filter(
+            SiswaKelas.siswa_id == siswa_id,
+            SiswaKelas.kelas_id == jadwal.kelas_id,
+            SiswaKelas.tahun_pelajaran_id == jadwal.tahun_pelajaran_id,
+            SiswaKelas.status == "aktif",
+        ).first()
+        if not siswa_di_kelas_jadwal and siswa.kelas_id != jadwal.kelas_id:
             raise ValueError("Siswa tidak berada di kelas jadwal ini")
 
         if guru_id != jadwal.guru_id:

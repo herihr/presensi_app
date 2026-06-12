@@ -3,7 +3,9 @@ from models.guru import Guru
 from models.guru_mapel import GuruMapel
 from models.kelas import Kelas
 from models.mata_pelajaran import MataPelajaran
+from models.wali_kelas import WaliKelas
 from core.security import hash_password
+from services.tahun_pelajaran_service import TahunPelajaranService
 
 
 class GuruService:
@@ -34,6 +36,12 @@ class GuruService:
                     raise ValueError("Kelas asuh tidak ditemukan")
                 GuruService._ensure_kelas_available_for_wali(kelas, guru.id)
                 kelas.wali_kelas_id = guru.id
+                GuruService._upsert_wali_kelas_tahunan(
+                    db,
+                    guru_id=guru.id,
+                    kelas_id=kelas.id,
+                    tahun_pelajaran_id=TahunPelajaranService.get_active(db).id,
+                )
 
             db.commit()
             db.refresh(guru)
@@ -103,6 +111,10 @@ class GuruService:
                 db.query(Kelas).filter(Kelas.wali_kelas_id == guru.id).update(
                     {Kelas.wali_kelas_id: None}
                 )
+                db.query(WaliKelas).filter(
+                    WaliKelas.guru_id == guru.id,
+                    WaliKelas.tahun_pelajaran_id == TahunPelajaranService.get_active(db).id,
+                ).delete(synchronize_session=False)
 
                 for kelas_id in GuruService._requested_kelas_asuh_ids(data):
                     kelas = db.query(Kelas).filter(Kelas.id == kelas_id).first()
@@ -110,6 +122,12 @@ class GuruService:
                         raise ValueError("Kelas asuh tidak ditemukan")
                     GuruService._ensure_kelas_available_for_wali(kelas, guru.id)
                     kelas.wali_kelas_id = guru.id
+                    GuruService._upsert_wali_kelas_tahunan(
+                        db,
+                        guru_id=guru.id,
+                        kelas_id=kelas.id,
+                        tahun_pelajaran_id=TahunPelajaranService.get_active(db).id,
+                    )
 
             db.commit()
             db.refresh(guru)
@@ -130,6 +148,7 @@ class GuruService:
             db.query(Kelas).filter(Kelas.wali_kelas_id == guru.id).update(
                 {Kelas.wali_kelas_id: None}
             )
+            db.query(WaliKelas).filter(WaliKelas.guru_id == guru.id).delete()
             db.delete(guru)
             db.commit()
             return True
@@ -166,3 +185,22 @@ class GuruService:
     def _ensure_kelas_available_for_wali(kelas: Kelas, guru_id: int):
         if kelas.wali_kelas_id is not None and kelas.wali_kelas_id != guru_id:
             raise ValueError("Kelas ini sudah memiliki wali kelas")
+
+    @staticmethod
+    def _upsert_wali_kelas_tahunan(
+        db: Session,
+        guru_id: int,
+        kelas_id: int,
+        tahun_pelajaran_id: int,
+    ):
+        db.query(WaliKelas).filter(
+            WaliKelas.kelas_id == kelas_id,
+            WaliKelas.tahun_pelajaran_id == tahun_pelajaran_id,
+        ).delete(synchronize_session=False)
+        db.add(
+            WaliKelas(
+                guru_id=guru_id,
+                kelas_id=kelas_id,
+                tahun_pelajaran_id=tahun_pelajaran_id,
+            )
+        )

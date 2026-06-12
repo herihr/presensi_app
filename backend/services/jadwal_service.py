@@ -4,6 +4,7 @@ from models.guru_mapel import GuruMapel
 from models.jadwal import Jadwal
 from models.kelas import Kelas
 from models.mata_pelajaran import MataPelajaran
+from services.tahun_pelajaran_service import TahunPelajaranService
 
 
 class JadwalService:
@@ -22,11 +23,13 @@ class JadwalService:
     @staticmethod
     def create_jadwal(db: Session, data):
         try:
+            tahun_id = data.tahun_pelajaran_id or TahunPelajaranService.get_active(db).id
             JadwalService._validate_references(db, data.kelas_id, data.guru_id, data.mapel_id)
             JadwalService._validate_no_overlap(
                 db,
                 kelas_id=data.kelas_id,
                 guru_id=data.guru_id,
+                tahun_pelajaran_id=tahun_id,
                 hari=data.hari,
                 jam_mulai=data.jam_mulai,
                 jam_selesai=data.jam_selesai,
@@ -36,6 +39,7 @@ class JadwalService:
                 kelas_id=data.kelas_id,
                 mapel_id=data.mapel_id,
                 guru_id=data.guru_id,
+                tahun_pelajaran_id=tahun_id,
                 hari=data.hari,
                 jam_mulai=data.jam_mulai,
                 jam_selesai=data.jam_selesai
@@ -55,6 +59,7 @@ class JadwalService:
             JadwalService._validate_batch_payload(items)
 
             for item in items:
+                tahun_id = item.tahun_pelajaran_id or TahunPelajaranService.get_active(db).id
                 JadwalService._validate_references(
                     db,
                     item.kelas_id,
@@ -65,6 +70,7 @@ class JadwalService:
                     db,
                     kelas_id=item.kelas_id,
                     guru_id=item.guru_id,
+                    tahun_pelajaran_id=tahun_id,
                     hari=item.hari,
                     jam_mulai=item.jam_mulai,
                     jam_selesai=item.jam_selesai,
@@ -75,6 +81,7 @@ class JadwalService:
                     kelas_id=item.kelas_id,
                     mapel_id=item.mapel_id,
                     guru_id=item.guru_id,
+                    tahun_pelajaran_id=item.tahun_pelajaran_id or TahunPelajaranService.get_active(db).id,
                     hari=item.hari,
                     jam_mulai=item.jam_mulai,
                     jam_selesai=item.jam_selesai,
@@ -93,13 +100,15 @@ class JadwalService:
 
     # 🔹 GET ALL JADWAL
     @staticmethod
-    def get_all_jadwal(db: Session):
+    def get_all_jadwal(db: Session, tahun_pelajaran_id: int | None = None):
+        tahun_id = tahun_pelajaran_id or TahunPelajaranService.get_active(db).id
         jadwal = (
             db.query(Jadwal)
             .filter(
                 Jadwal.kelas_id.isnot(None),
                 Jadwal.mapel_id.isnot(None),
                 Jadwal.guru_id.isnot(None),
+                Jadwal.tahun_pelajaran_id == tahun_id,
             )
             .all()
         )
@@ -115,23 +124,46 @@ class JadwalService:
 
     # 🔹 GET JADWAL BY KELAS
     @staticmethod
-    def get_jadwal_by_kelas(db: Session, kelas_id: int):
-        jadwal = db.query(Jadwal).filter(Jadwal.kelas_id == kelas_id).all()
+    def get_jadwal_by_kelas(
+        db: Session,
+        kelas_id: int,
+        tahun_pelajaran_id: int | None = None,
+    ):
+        tahun_id = tahun_pelajaran_id or TahunPelajaranService.get_active(db).id
+        jadwal = db.query(Jadwal).filter(
+            Jadwal.kelas_id == kelas_id,
+            Jadwal.tahun_pelajaran_id == tahun_id,
+        ).all()
         JadwalService._normalize_result_days(jadwal)
         return jadwal
 
     # 🔹 GET JADWAL BY GURU
     @staticmethod
-    def get_jadwal_by_guru(db: Session, guru_id: int):
-        jadwal = db.query(Jadwal).filter(Jadwal.guru_id == guru_id).all()
+    def get_jadwal_by_guru(
+        db: Session,
+        guru_id: int,
+        tahun_pelajaran_id: int | None = None,
+    ):
+        tahun_id = tahun_pelajaran_id or TahunPelajaranService.get_active(db).id
+        jadwal = db.query(Jadwal).filter(
+            Jadwal.guru_id == guru_id,
+            Jadwal.tahun_pelajaran_id == tahun_id,
+        ).all()
         JadwalService._normalize_result_days(jadwal)
         return jadwal
 
     # 🔹 GET JADWAL BY HARI
     @staticmethod
-    def get_jadwal_by_hari(db: Session, kelas_id: int, hari: str):
+    def get_jadwal_by_hari(
+        db: Session,
+        kelas_id: int,
+        hari: str,
+        tahun_pelajaran_id: int | None = None,
+    ):
+        tahun_id = tahun_pelajaran_id or TahunPelajaranService.get_active(db).id
         jadwal = db.query(Jadwal).filter(
             Jadwal.kelas_id == kelas_id,
+            Jadwal.tahun_pelajaran_id == tahun_id,
             Jadwal.hari == hari
         ).all()
         JadwalService._normalize_result_days(jadwal)
@@ -139,8 +171,16 @@ class JadwalService:
 
     # 🔹 GET JADWAL BY MAPEL
     @staticmethod
-    def get_jadwal_by_mapel(db: Session, mapel_id: int):
-        jadwal = db.query(Jadwal).filter(Jadwal.mapel_id == mapel_id).all()
+    def get_jadwal_by_mapel(
+        db: Session,
+        mapel_id: int,
+        tahun_pelajaran_id: int | None = None,
+    ):
+        tahun_id = tahun_pelajaran_id or TahunPelajaranService.get_active(db).id
+        jadwal = db.query(Jadwal).filter(
+            Jadwal.mapel_id == mapel_id,
+            Jadwal.tahun_pelajaran_id == tahun_id,
+        ).all()
         JadwalService._normalize_result_days(jadwal)
         return jadwal
 
@@ -155,6 +195,7 @@ class JadwalService:
             kelas_id = data.kelas_id or jadwal.kelas_id
             guru_id = data.guru_id or jadwal.guru_id
             mapel_id = data.mapel_id or jadwal.mapel_id
+            tahun_pelajaran_id = data.tahun_pelajaran_id or jadwal.tahun_pelajaran_id or TahunPelajaranService.get_active(db).id
             hari = data.hari or jadwal.hari
             jam_mulai = data.jam_mulai or jadwal.jam_mulai
             jam_selesai = data.jam_selesai or jadwal.jam_selesai
@@ -167,6 +208,7 @@ class JadwalService:
                 db,
                 kelas_id=kelas_id,
                 guru_id=guru_id,
+                tahun_pelajaran_id=tahun_pelajaran_id,
                 hari=hari,
                 jam_mulai=jam_mulai,
                 jam_selesai=jam_selesai,
@@ -176,6 +218,7 @@ class JadwalService:
             jadwal.kelas_id = kelas_id
             jadwal.mapel_id = mapel_id
             jadwal.guru_id = guru_id
+            jadwal.tahun_pelajaran_id = tahun_pelajaran_id
             jadwal.hari = hari
             jadwal.jam_mulai = jam_mulai
             jadwal.jam_selesai = jam_selesai
@@ -217,6 +260,7 @@ class JadwalService:
         db: Session,
         kelas_id: int,
         guru_id: int,
+        tahun_pelajaran_id: int,
         hari: str,
         jam_mulai: str,
         jam_selesai: str,
@@ -224,6 +268,7 @@ class JadwalService:
     ):
         query = db.query(Jadwal).filter(
             Jadwal.hari == hari,
+            Jadwal.tahun_pelajaran_id == tahun_pelajaran_id,
             Jadwal.jam_mulai < jam_selesai,
             Jadwal.jam_selesai > jam_mulai,
         )
@@ -243,7 +288,12 @@ class JadwalService:
     def _validate_batch_payload(items):
         seen_mapel = set()
         for item in items:
-            mapel_key = (item.kelas_id, item.hari, item.mapel_id)
+            mapel_key = (
+                item.kelas_id,
+                item.tahun_pelajaran_id,
+                item.hari,
+                item.mapel_id,
+            )
             if mapel_key in seen_mapel:
                 raise ValueError("Mata pelajaran dalam satu jadwal tidak boleh sama")
             seen_mapel.add(mapel_key)

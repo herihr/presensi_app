@@ -16,6 +16,8 @@ from models.admin import Admin
 from models.kelas import Kelas
 from models.guru_mapel import GuruMapel
 from models.password_reset import PasswordResetCode
+from models.wali_kelas import WaliKelas
+from services.tahun_pelajaran_service import TahunPelajaranService
 
 from schemas.auth_schema import ForgotPasswordRequest, LoginRequest, ResetPasswordRequest
 
@@ -35,9 +37,15 @@ def login(data: LoginRequest, db: Session = Depends(get_db)):
     if guru and verify_password(data.password, guru.password):
 
         # 🔎 cek apakah wali kelas
-        is_wali = db.query(Kelas).filter(
-            Kelas.wali_kelas_id == guru.id
+        active_year = TahunPelajaranService.get_active(db)
+        is_wali = db.query(WaliKelas).filter(
+            WaliKelas.guru_id == guru.id,
+            WaliKelas.tahun_pelajaran_id == active_year.id,
         ).first() is not None
+        if not is_wali:
+            is_wali = db.query(Kelas).filter(
+                Kelas.wali_kelas_id == guru.id
+            ).first() is not None
 
         # 🔎 cek apakah guru mapel
         is_mapel = db.query(GuruMapel).filter(

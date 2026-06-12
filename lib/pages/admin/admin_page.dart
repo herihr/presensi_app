@@ -13,12 +13,10 @@ import 'admin_kelas_view.dart';
 import 'admin_mata_pelajaran_view.dart';
 import 'admin_jadwal_view.dart';
 import 'admin_profile_page.dart';
+import 'admin_tahun_pelajaran_view.dart';
 
 class AdminPage extends StatefulWidget {
-  const AdminPage({
-    super.key,
-    this.user,
-  });
+  const AdminPage({super.key, this.user});
 
   final User? user;
 
@@ -63,9 +61,7 @@ class _AdminPageState extends State<AdminPage> {
     }
 
     final updatedUser = await Navigator.of(context).push<User>(
-      MaterialPageRoute(
-        builder: (_) => AdminProfilePage(user: currentUser),
-      ),
+      MaterialPageRoute(builder: (_) => AdminProfilePage(user: currentUser)),
     );
 
     if (updatedUser == null || !mounted) return;
@@ -116,7 +112,7 @@ class _AdminPageState extends State<AdminPage> {
       backgroundColor: const Color(0xFFFAF8FF),
       // ============ HEADER (FIX) ============
       appBar: AppBar(
-        backgroundColor: Colors.white.withOpacity(0.9),
+        backgroundColor: Colors.white.withValues(alpha: 0.9),
         elevation: 1,
         titleSpacing: 16,
         title: Tooltip(
@@ -148,7 +144,9 @@ class _AdminPageState extends State<AdminPage> {
                   const SizedBox(width: 12),
                   Flexible(
                     child: Text(
-                      currentUser.nama.isEmpty ? 'PresenSatu' : currentUser.nama,
+                      currentUser.nama.isEmpty
+                          ? 'PresenSatu'
+                          : currentUser.nama,
                       maxLines: 1,
                       overflow: TextOverflow.ellipsis,
                       style: const TextStyle(
@@ -170,7 +168,10 @@ class _AdminPageState extends State<AdminPage> {
             onPressed: _logout,
           ),
           IconButton(
-            icon: const Icon(Icons.notifications_outlined, color: Color(0xFF737686)),
+            icon: const Icon(
+              Icons.notifications_outlined,
+              color: Color(0xFF737686),
+            ),
             onPressed: () {},
           ),
         ],
@@ -183,7 +184,7 @@ class _AdminPageState extends State<AdminPage> {
         decoration: BoxDecoration(
           border: Border(
             top: BorderSide(
-              color: Colors.black.withOpacity(0.08),
+              color: Colors.black.withValues(alpha: 0.08),
               width: 1,
             ),
           ),
@@ -197,6 +198,8 @@ class _AdminPageState extends State<AdminPage> {
           backgroundColor: Colors.white,
           selectedItemColor: const Color(0xFF2563EB),
           unselectedItemColor: const Color(0xFF737686),
+          selectedFontSize: 11,
+          unselectedFontSize: 11,
           items: const [
             BottomNavigationBarItem(
               icon: Icon(Icons.dashboard_outlined),
@@ -222,6 +225,10 @@ class _AdminPageState extends State<AdminPage> {
               icon: Icon(Icons.schedule_outlined),
               label: 'Jadwal',
             ),
+            BottomNavigationBarItem(
+              icon: Icon(Icons.event_repeat_outlined),
+              label: 'Tahun',
+            ),
           ],
         ),
       ),
@@ -242,6 +249,8 @@ class _AdminPageState extends State<AdminPage> {
         return const AdminMataPelajaranView();
       case 5:
         return const AdminJadwalView();
+      case 6:
+        return const AdminTahunPelajaranView();
       default:
         return const AdminDashboardView();
     }

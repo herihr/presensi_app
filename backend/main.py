@@ -21,6 +21,9 @@ from models import jadwal
 from models import presensi
 from models import embedding
 from models import password_reset
+from models import tahun_pelajaran
+from models import siswa_kelas
+from models import wali_kelas
 
 # 🔥 BUAT TABEL OTOMATIS
 Base.metadata.create_all(bind=engine)
@@ -37,6 +40,8 @@ from routers.jadwal_router import router as jadwal_router
 from routers.presensi_router import router as presensi_crud_router
 from routers.embedding_router import router as embedding_crud_router
 from routers.upload_router import router as upload_router
+from routers.ai_router import router as ai_router
+from routers.tahun_pelajaran_router import router as tahun_pelajaran_router
 
 app = FastAPI(title="Presensi Wajah API")
 UPLOAD_DIR = Path(__file__).resolve().parent / "uploads"
@@ -65,6 +70,8 @@ app.include_router(jadwal_router, prefix="/api")
 app.include_router(presensi_crud_router, prefix="/api")
 app.include_router(embedding_crud_router, prefix="/api")
 app.include_router(upload_router, prefix="/api")
+app.include_router(ai_router, prefix="/api")
+app.include_router(tahun_pelajaran_router, prefix="/api")
 
 app.mount("/uploads", StaticFiles(directory=str(UPLOAD_DIR)), name="uploads")
 

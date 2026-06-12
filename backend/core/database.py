@@ -1,3 +1,5 @@
+from datetime import date
+
 from sqlalchemy import create_engine, inspect, text
 from sqlalchemy.exc import SQLAlchemyError
 from sqlalchemy.orm import sessionmaker, declarative_base
@@ -12,6 +14,10 @@ Base = declarative_base()
 
 
 def ensure_schema_updates():
+    inspector = inspect(engine)
+    table_names = inspector.get_table_names()
+
+    active_year_id = _ensure_active_tahun_pelajaran(table_names)
     inspector = inspect(engine)
     table_names = inspector.get_table_names()
 
@@ -94,6 +100,25 @@ def ensure_schema_updates():
         )
 
     if "jadwal" in table_names:
+        jadwal_columns = {column["name"] for column in inspector.get_columns("jadwal")}
+        if "tahun_pelajaran_id" not in jadwal_columns:
+            with engine.begin() as connection:
+                connection.execute(
+                    text("ALTER TABLE jadwal ADD COLUMN tahun_pelajaran_id INT NULL")
+                )
+                connection.execute(
+                    text(
+                        "UPDATE jadwal SET tahun_pelajaran_id = :tahun_id "
+                        "WHERE tahun_pelajaran_id IS NULL"
+                    ),
+                    {"tahun_id": active_year_id},
+                )
+        _create_index_if_missing(
+            "jadwal",
+            "idx_jadwal_tahun_pelajaran_id",
+            ["tahun_pelajaran_id"],
+        )
+
         try:
             with engine.begin() as connection:
                 if "presensi" in table_names:
@@ -126,6 +151,108 @@ def ensure_schema_updates():
             )
             connection.execute(
                 text("ALTER TABLE embeddings MODIFY COLUMN siswa_id INT NOT NULL")
+            )
+
+    _ensure_school_year_bridge_data(active_year_id)
+
+
+def _default_school_year_name() -> str:
+    today = date.today()
+    start_year = today.year if today.month >= 7 else today.year - 1
+    return f"{start_year}/{start_year + 1}"
+
+
+def _ensure_active_tahun_pelajaran(table_names: list[str]) -> int:
+    if "tahun_pelajaran" not in table_names:
+        return 0
+
+    with engine.begin() as connection:
+        active = connection.execute(
+            text("SELECT id FROM tahun_pelajaran WHERE is_aktif = 1 LIMIT 1")
+        ).first()
+        if active:
+            return int(active[0])
+
+        name = _default_school_year_name()
+        existing = connection.execute(
+            text("SELECT id FROM tahun_pelajaran WHERE nama = :nama LIMIT 1"),
+            {"nama": name},
+        ).first()
+        if existing:
+            connection.execute(
+                text(
+                    "UPDATE tahun_pelajaran SET is_aktif = 1 "
+                    "WHERE id = :tahun_id"
+                ),
+                {"tahun_id": int(existing[0])},
+            )
+            return int(existing[0])
+
+        connection.execute(
+            text(
+                "INSERT INTO tahun_pelajaran "
+                "(nama, tanggal_mulai, tanggal_selesai, is_aktif) "
+                "VALUES (:nama, :mulai, :selesai, 1)"
+            ),
+            {
+                "nama": name,
+                "mulai": f"{name[:4]}-07-01",
+                "selesai": f"{int(name[:4]) + 1}-06-30",
+            },
+        )
+        created = connection.execute(
+            text("SELECT id FROM tahun_pelajaran WHERE nama = :nama LIMIT 1"),
+            {"nama": name},
+        ).first()
+        return int(created[0])
+
+
+def _ensure_school_year_bridge_data(active_year_id: int):
+    if not active_year_id:
+        return
+
+    inspector = inspect(engine)
+    table_names = inspector.get_table_names()
+
+    if {"siswa", "siswa_kelas"}.issubset(table_names):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO siswa_kelas "
+                    "(siswa_id, kelas_id, tahun_pelajaran_id, status) "
+                    "SELECT s.id, s.kelas_id, :tahun_id, 'aktif' "
+                    "FROM siswa s "
+                    "WHERE s.kelas_id IS NOT NULL "
+                    "AND NOT EXISTS ("
+                    "  SELECT 1 FROM siswa_kelas sk "
+                    "  WHERE sk.siswa_id = s.id "
+                    "  AND sk.tahun_pelajaran_id = :tahun_id"
+                    ")"
+                ),
+                {"tahun_id": active_year_id},
+            )
+
+    if {"kelas", "wali_kelas"}.issubset(table_names):
+        with engine.begin() as connection:
+            connection.execute(
+                text(
+                    "INSERT INTO wali_kelas "
+                    "(guru_id, kelas_id, tahun_pelajaran_id) "
+                    "SELECT k.wali_kelas_id, k.id, :tahun_id "
+                    "FROM kelas k "
+                    "WHERE k.wali_kelas_id IS NOT NULL "
+                    "AND NOT EXISTS ("
+                    "  SELECT 1 FROM wali_kelas wk "
+                    "  WHERE wk.kelas_id = k.id "
+                    "  AND wk.tahun_pelajaran_id = :tahun_id"
+                    ") "
+                    "AND NOT EXISTS ("
+                    "  SELECT 1 FROM wali_kelas wk2 "
+                    "  WHERE wk2.guru_id = k.wali_kelas_id "
+                    "  AND wk2.tahun_pelajaran_id = :tahun_id"
+                    ")"
+                ),
+                {"tahun_id": active_year_id},
             )
 
 
